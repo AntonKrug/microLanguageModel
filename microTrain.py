@@ -97,15 +97,15 @@ def vocabulary_creation():
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("function", type=str, choices=["count_words", "plain_text", "vocabulary"])
+    parser.add_argument("function", type=str, choices=["count_words", "plain_text", "vocabulary_creation"])
     args = parser.parse_args()
 
     if args.function == "count_words":
         count_words()
     elif args.function == "plain_text":
         plain_text()
-    elif args.function == "vocabulary":
-        vocabulary()
+    elif args.function == "vocabulary_creation":
+        vocabulary_creation()
     else:
         raise ValueError(f"Unknown argument {args.function}")
 
