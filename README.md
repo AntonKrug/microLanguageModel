@@ -26,4 +26,4 @@ Including the versions which worked for me quick justification/explanations why:
   - If we want to build our own protobuf (protobufer protoc) to read/modify the vocabulary `winget install protobuf` https://protobuf.dev/installation/
   - And to use the protoc `protoc --python_out=. sentencepiece_model.proto`
 - If wanting to experiment get the Jupyter notebook as well: `pip install jupyterlab`
-  - To ran on my NAS and have remote access `jupyter notebook --no-browser --port=8080`
+  - To ran on my NAS and have remote access `jupyter notebook --no-browser --port=8888`
