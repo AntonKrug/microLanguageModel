@@ -24,4 +24,5 @@ Including the versions which worked for me quick justification/explanations why:
 - Pandas `pip install pandas`
 - SentencePiece `pip install sentencepiece` https://github.com/google/sentencepiece 
   - If we want to build our own protobuf (protobufer protoc) to read/modify the vocabulary `winget install protobuf` https://protobuf.dev/installation/
+  - And to use the protoc `protoc --python_out=. sentencepiece_model.proto`
 - If wanting to experiment get the Jupyter notebook as well: `pip install jupyterlab`
