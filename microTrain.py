@@ -23,10 +23,10 @@ def panda_split_to_words(text):
     words = text.split()
     return Counter(words)
 
-def header(*title):
-    print("-"*70)
-    print(title)
+def header(*args, **kwargs):
     print()
+    print("-"*70)
+    print(*args, **kwargs)
 
 def count_words():
     header("Loading input json file as panda dataframe ", input_data_json_file_name)
@@ -47,7 +47,7 @@ def count_words():
     print(total_counter)
     i = 1
     for word in total_counter:
-        print(i, word)
+        print(i, word, ' => ', total_counter[word])
         i=i+1
 
     print('Words used in texts ', len(total_counter))
@@ -67,7 +67,7 @@ def plain_text():
         plain_file.write("\n")
     plain_file.close()
 
-def vocabulary():
+def vocabulary_creation():
     header("Preparing vocabulary tokens")
     # https://github.com/google/sentencepiece
     # https://colab.research.google.com/github/google/sentencepiece/blob/master/python/sentencepiece_python_module_example.ipynb
