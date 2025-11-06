@@ -23,4 +23,5 @@ Including the versions which worked for me quick justification/explanations why:
   - If getting `ERROR: No matching distribution found for typing-extensions>=4.10.0` then `python -m pip install --upgrade pip` should fix it
 - Pandas `pip install pandas`
 - SentencePiece `pip install sentencepiece` https://github.com/google/sentencepiece 
+  - If we want to build our own protobuf (protobufer protoc) to read/modify the vocabulary `winget install protobuf` https://protobuf.dev/installation/
 - If wanting to experiment get the Jupyter notebook as well: `pip install jupyterlab`
