@@ -29,7 +29,7 @@ def header(*args, **kwargs):
     print(*args, **kwargs)
 
 def count_words():
-    header("Loading input json file as panda dataframe ", input_data_json_file_name)
+    header('Loading input json file as panda dataframe', input_data_json_file_name)
     df = pandas.read_json(input_data_json_file_name)
 
     header("Counting words")
@@ -50,17 +50,17 @@ def count_words():
         print(i, word, ' => ', total_counter[word])
         i=i+1
 
-    print('Words used in texts ', len(total_counter))
+    print('Words used in texts', len(total_counter))
 
 
 def plain_text():
-    header("Loading input json file ", input_data_json_file_name)
-    input_json_file = open(input_data_json_file_name, "r")
+    header('Loading input json file', input_data_json_file_name)
+    input_json_file = open(input_data_json_file_name, 'r')
     input_sentences = json.load(input_json_file)
     input_json_file.close()
 
-    header("Parsing to a plain text file ", plain_text_data_file_name)
-    plain_file = open(plain_text_data_file_name, "w")
+    header('Parsing to a plain text file', plain_text_data_file_name)
+    plain_file = open(plain_text_data_file_name, 'w')
     for text in input_sentences:
         text = text["text"]
         plain_file.write(text)
