@@ -21,4 +21,6 @@ Including the versions which worked for me quick justification/explanations why:
   - Getting pytorch for CUDA SDK 13.0 (Windows and Linux step should be identical)
   - `pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cu130`
   - If getting `ERROR: No matching distribution found for typing-extensions>=4.10.0` then `python -m pip install --upgrade pip` should fix it
+- Pandas `pip install pandas`
+- SentencePiece `pip install sentencepiece` https://github.com/google/sentencepiece 
 - If wanting to experiment get the Jupyter notebook as well: `pip install jupyterlab`
