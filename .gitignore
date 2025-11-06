@@ -1,1 +1,3 @@
-data-input/sentences.json
+data-input/*
+data-work/*
+data-output/*
