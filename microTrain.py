@@ -7,31 +7,42 @@ import re
 import pandas
 import sentencepiece
 
-vocabulary_size = 4445
+vocabulary_size = 4008
 
 input_data_json_file_name = os.path.join("data-input", "sentences.json")
 plain_text_data_file_name = os.path.join("data-work", "plain_text_sentences.txt")
 vocabulary_file_name =  os.path.join("data-work", "vocabulary")
 
-class OrderedCounter(Counter, OrderedDict):
-    pass
+word_counts_total = Counter()
+first_word_total = Counter()
 
-total_counter = OrderedCounter()
 
 def panda_split_to_words(text):
     # text = re.sub(r"[^\w\s']", '', text)  # remove punctuation
     words = text.split()
     return Counter(words)
 
+
+def panda_first_word(text):
+    words = text.split()
+    if len(words) > 0:
+        return words[0]
+    else:
+        print('ERROR, bad sentence encountered', text)
+        return "_ERROR_"
+
+
 def header(*args, **kwargs):
     print()
     print("-"*70)
     print(*args, **kwargs)
 
+
 def count_words():
     header('Loading input json file as panda dataframe', input_data_json_file_name)
     df = pandas.read_json(input_data_json_file_name)
 
+    #---------------------- word count -------------------------------
     header("Counting words")
 
     print('Splitting texts to words')
@@ -42,15 +53,30 @@ def count_words():
 
     print('Adding up words for all texts')
     for count_in_one_text in df['words']:
-        total_counter.update(count_in_one_text)
+        word_counts_total.update(count_in_one_text)
 
-    print(total_counter)
     i = 1
-    for word in total_counter:
-        print(i, word, ' => ', total_counter[word])
+    for word in sorted(word_counts_total, key=word_counts_total.get, reverse=True):
+        print(i, word, ' => ', word_counts_total[word])
         i=i+1
 
-    print('Words used in texts', len(total_counter))
+    print('Words used in texts', len(word_counts_total))
+    if vocabulary_size == len(word_counts_total):
+        print('Matching hard-coded vocabulary size')
+    else:
+        print('Not matching the hard-coded vocabulary size', vocabulary_size)
+
+    # --------------------- first words ------------------------------------
+    header('Counting first words')
+    df['first'] = df['text'].apply(panda_first_word)
+
+    for first in df['first']:
+        first_word_total.update([first])
+
+    for word in sorted(first_word_total, key=first_word_total.get, reverse=True):
+        print(word, ' => ', first_word_total[word])
+
+    return df
 
 
 def plain_text():
@@ -66,6 +92,8 @@ def plain_text():
         plain_file.write(text)
         plain_file.write("\n")
     plain_file.close()
+    print('Processed', len(input_sentences), 'sentences')
+
 
 def vocabulary_creation():
     header("Preparing vocabulary tokens")
@@ -81,7 +109,7 @@ def vocabulary_creation():
     sentencepiece.SentencePieceTrainer.train(input=plain_text_data_file_name,
                                              model_prefix=vocabulary_file_name,
                                              model_type="word",
-                                             vocab_size=vocabulary_size,
+                                             vocab_size=vocabulary_size + 2, # UNK and BOS
                                              self_test_sample_size=0,
                                              input_format="text",
                                              character_coverage=1.0,
@@ -90,7 +118,7 @@ def vocabulary_creation():
                                              allow_whitespace_only_pieces=True,
                                              byte_fallback=False,
                                              unk_surface="__UNKNOWN__",
-                                             bos_id=-1,  # maybe i will need the beginning
+                                             bos_id=1,  # maybe i will need the beginning
                                              eos_id=-1,  # maybe i will get away without the end
                                              normalization_rule_name="identity")
 
