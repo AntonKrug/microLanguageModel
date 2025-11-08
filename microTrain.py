@@ -159,7 +159,7 @@ def count_words():
     huffman_saves = total_char_used_for_vocabulary - (huffman_table_bytes + total_huffman_bytes_used)
     print(f"Non huffman approach {total_char_used_for_vocabulary} bytes - huffman "
           f"{huffman_table_bytes + total_huffman_bytes_used} bytes = huffman saves ~{huffman_saves} bytes (ignoring "
-          f"the fact that huffman decored needs to be implemented in the firmware)")
+          f"the fact that huffman decoder needs to be implemented in the firmware)")
 
     return df
 
