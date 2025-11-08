@@ -40,6 +40,37 @@ def header(*args, **kwargs):
     print(*args, **kwargs)
 
 
+def build_huffman_table(counter):
+    heap = []
+    _count = count()
+
+    # leaf nodes
+    for ch, freq in counter.items():
+        heap.append((freq, next(_count), ch))
+    heapq.heapify(heap)
+
+    # merge to single tree
+    while len(heap) > 1:
+        f1, _, left = heapq.heappop(heap)
+        f2, _, right = heapq.heappop(heap)
+        heapq.heappush(heap, (f1 + f2, next(_count), (left, right)))
+
+    # recursively assign codes
+    [(freq, _, root)] = heap
+    table = {}
+
+    def assign_codes(node, prefix=""):
+        if isinstance(node, str):
+            table[node] = prefix or "0"  # single-character case
+        else:
+            left, right = node
+            assign_codes(left, prefix + "0")
+            assign_codes(right, prefix + "1")
+
+    assign_codes(root)
+    return table
+
+
 def count_words():
     header('Loading input json file as panda dataframe', input_data_json_file_name)
     df = pandas.read_json(input_data_json_file_name)
@@ -81,12 +112,17 @@ def count_words():
     # --------------------- letter statistics ------------------------------------
     header('Counting letter usage of all words')
     for word in word_counts_total:
+        # there is ~12 bytes of savings in huffman tables if i would use single
+        # escape/shortcut characters for these 'once upon a time,' cases, but would
+        # spend more bytes in firmware to handle these edge cases. So it's better to
+        # have them inside the huffman table correctly without extra conditions in
+        # firmware
         if word == 'onceuponatime,':
-            # to 'once upon a time,'
-            word = '1'
+            word = 'once upon a time,'
+            # word = '1'
         elif word == 'oneday':
-            # to 'one day'
-            word = '2'
+            word = 'one day'
+            # word = '2'
 
         # not multiplying by the letter usage because that will use indexes to whole vocabulary tokens
         # count = word_counts_total[word]
@@ -98,10 +134,31 @@ def count_words():
         letter_counts_total.update(word)
         letter_counts_total.update('0')
 
+    total_char_used_for_vocabulary = 0
     for letter in sorted(letter_counts_total, key=letter_counts_total.get, reverse=True):
+        total_char_used_for_vocabulary += letter_counts_total[letter]
         print(letter, ' => ', letter_counts_total[letter])
+    print(f"Total amount of characters used to store whole vocabulary: {total_char_used_for_vocabulary}")
 
+    header('Huffman table')
+    huffman_table = build_huffman_table(letter_counts_total)
+    total_huffman_bits_used = 0
+    max_len_of_bits = 0
+    for ch, code in huffman_table.items():
+        bits_used = len(code) * letter_counts_total[ch]
+        total_huffman_bits_used += bits_used
+        if max_len_of_bits < len(code):
+            max_len_of_bits = len(code)
+        print(f"{ch!r}: {code}, length {len(code)} x frequency {letter_counts_total[ch]} = {bits_used} bits used")
+    huffman_table_bytes = 3 * len(huffman_table.items()) # 2 bytes for codeword (upto 14bits) + 1 byte for codeword mask (only 4bits needed)
+    total_huffman_bytes_used = int( (total_huffman_bits_used + 4) / 8 )
+    print(f"Codeword max length {max_len_of_bits}, total bits used as indexes to codewords {total_huffman_bits_used}. "
+          f"Bytes used as indexes to codewords {total_huffman_bytes_used} + huffman table {huffman_table_bytes} => "
+          f"total {huffman_table_bytes + total_huffman_bytes_used} bytes")
 
+    huffman_saves = total_char_used_for_vocabulary - (huffman_table_bytes + total_huffman_bytes_used)
+    print(f"Non huffman approach {total_char_used_for_vocabulary} bytes - huffman "
+          f"{huffman_table_bytes + total_huffman_bytes_used} bytes = huffman saves {huffman_saves} bytes")
 
     return df
 
