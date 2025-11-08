@@ -1,5 +1,7 @@
 import argparse
+import heapq
 from collections import OrderedDict, Counter
+from itertools import count
 import json
 import os
 import re
@@ -15,7 +17,7 @@ vocabulary_file_name =  os.path.join("data-work", "vocabulary")
 
 word_counts_total = Counter()
 first_word_total = Counter()
-
+letter_counts_total = Counter()
 
 def panda_split_to_words(text):
     # text = re.sub(r"[^\w\s']", '', text)  # remove punctuation
@@ -67,7 +69,7 @@ def count_words():
         print('Not matching the hard-coded vocabulary size', vocabulary_size)
 
     # --------------------- first words ------------------------------------
-    header('Counting first words')
+    header('Counting first word of each text')
     df['first'] = df['text'].apply(panda_first_word)
 
     for first in df['first']:
@@ -75,6 +77,31 @@ def count_words():
 
     for word in sorted(first_word_total, key=first_word_total.get, reverse=True):
         print(word, ' => ', first_word_total[word])
+
+    # --------------------- letter statistics ------------------------------------
+    header('Counting letter usage of all words')
+    for word in word_counts_total:
+        if word == 'onceuponatime,':
+            # to 'once upon a time,'
+            word = '1'
+        elif word == 'oneday':
+            # to 'one day'
+            word = '2'
+
+        # not multiplying by the letter usage because that will use indexes to whole vocabulary tokens
+        # count = word_counts_total[word]
+        # letters = Counter(word)
+        # letters *= count
+        # letter_counts_total.update(letters)
+        # letter_counts_total.update({'0': count})
+
+        letter_counts_total.update(word)
+        letter_counts_total.update('0')
+
+    for letter in sorted(letter_counts_total, key=letter_counts_total.get, reverse=True):
+        print(letter, ' => ', letter_counts_total[letter])
+
+
 
     return df
 
@@ -109,7 +136,7 @@ def vocabulary_creation():
     sentencepiece.SentencePieceTrainer.train(input=plain_text_data_file_name,
                                              model_prefix=vocabulary_file_name,
                                              model_type="word",
-                                             vocab_size=vocabulary_size + 2, # UNK and BOS
+                                             vocab_size=vocabulary_size + 1, # UNK and BOS
                                              self_test_sample_size=0,
                                              input_format="text",
                                              character_coverage=1.0,
