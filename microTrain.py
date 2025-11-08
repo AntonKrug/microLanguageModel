@@ -192,9 +192,43 @@ def count_words():
            f"bytes ignoring the firmware differences to support this")
 
 
-    header('Huffman table ordered for the firmware')
-    for ch, code in sorted(huffman_table.items(), key=lambda x: (len(x[1]))):
+    header('Huffman (aligned) table ordered for the firmware')
+    sorted_huffman_table = sorted(huffman_table.items(), key=lambda x: (len(x[1])))
+    for ch, code in sorted_huffman_table:
         print(f"{{ .code=0'b{code.ljust(16, '0')}, .bits={str(len(code)).zfill(2)} .character='{ch}' }}, // {code}")
+
+    header('Huffman (streamed) payload ')
+    stream_payload = ''
+    for ch, code in sorted_huffman_table:
+        # current_entry = str(bin(len(code))) + str(code) + str(bin(ord(ch)-character_ord_min))
+        current_entry = f"{len(code):b}{code}{(ord(ch)-character_ord_min):b}"
+        print(f"Entry for {ch} = {current_entry}")
+        stream_payload += current_entry
+
+    # Calculate how many bits to pad to reach multiple of 32
+    pad_len = (32 - len(stream_payload) % 32)  # %32 handles exact multiple
+    print(f"Stream needs to be padded with {pad_len} zeros")
+    stream_payload = stream_payload + "0" * pad_len
+
+    print(f"Final combined streamed payload in bits {stream_payload}")
+
+    hex_str = hex(int(stream_payload, 2))[2:]  # remove '0x' prefix
+    print(f"As one whole hex string {hex_str}")
+
+    hex_chunks = []
+    for i in range(0, len(stream_payload), 32):
+        chunk = stream_payload[i:i + 32]
+        hex_chunk = hex(int(chunk, 2))[2:].zfill(8)  # 8 hex digits = 32 bits
+        hex_chunks.append(hex_chunk)
+
+    print(f"As {len(hex_chunks)} 32-bit hex chunks:")
+
+    print("[", end="")
+    comma = ''
+    for chunk in hex_chunks:
+        print(f"{comma}0x{chunk}", end="")
+        comma = ', '
+    print("];")
 
     return df
 
