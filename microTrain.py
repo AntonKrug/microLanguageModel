@@ -131,7 +131,7 @@ def count_words():
         # letter_counts_total.update(letters)
         # letter_counts_total.update({'0': count})
 
-        letter_counts_total.update(word)
+        letter_counts_total.update(word.upper())
         letter_counts_total.update('0')
 
     total_char_used_for_vocabulary = 0
@@ -142,26 +142,55 @@ def count_words():
 
     header('Huffman table creation')
     huffman_table = build_huffman_table(letter_counts_total)
-    total_huffman_bits_used = 0
-    max_len_of_bits = 0
+    total_huffman_table_codeword_bits_used = 0
+    codeword_max_len_of_bits = 0
+    character_ord_min = 255
+    character_ord_max = 0
     for ch, code in huffman_table.items():
         bits_used = len(code) * letter_counts_total[ch]
-        total_huffman_bits_used += bits_used
-        if max_len_of_bits < len(code):
-            max_len_of_bits = len(code)
-        print(f"{ch!r}: {code}, length {len(code)} x frequency {letter_counts_total[ch]} = {bits_used} bits used")
+
+        if ord(ch) < character_ord_min:
+            character_ord_min = ord(ch)
+        if ord(ch) > character_ord_max:
+            character_ord_max = ord(ch)
+
+        if codeword_max_len_of_bits < len(code):
+            codeword_max_len_of_bits = len(code)
+        print(f"{ch!r} (ord {ord(ch):>3}): {code:>14}, length {len(code):>2} x frequency {letter_counts_total[ch]:>4} = {bits_used:>5} bits used in "
+              f"total whole vocabulary to address this codeword")
+
+    delta_characters_ord = character_ord_max - character_ord_min
+    print(f"Output character min ord {character_ord_min}, max ord {character_ord_max}, delta {delta_characters_ord}, "
+          f"needing bits {delta_characters_ord.bit_length()}")
+    total_bits_used_in_huffman_table_for_output_letter = delta_characters_ord.bit_length() * len(huffman_table.items())
 
     # 2 bytes for codeword (upto 14bits) + 1 byte for codeword mask (only 4bits needed) + 1 byte for the output character
-    huffman_table_bytes = 4 * len(huffman_table.items())
-    total_huffman_bytes_used = int( (total_huffman_bits_used + 4) / 8 )
-    print(f"Codeword max length {max_len_of_bits}, total bits used as indexes to codewords {total_huffman_bits_used}. "
-          f"Bytes used as indexes to codewords {total_huffman_bytes_used} + huffman table {huffman_table_bytes} => "
-          f"total {huffman_table_bytes + total_huffman_bytes_used} bytes")
+    huffman_table_bytes_aligned = 4 * len(huffman_table.items())
+    total_huffman_bytes_used = int( (total_huffman_table_codeword_bits_used + 4) / 8 )
+    print(f"Huffman (aligned) Codeword max length {codeword_max_len_of_bits}, total bits used as indexes to codewords "
+          f"{total_huffman_table_codeword_bits_used}. Bytes used as indexes to codewords {total_huffman_bytes_used} + "
+          f"huffman table {huffman_table_bytes_aligned} => total {huffman_table_bytes_aligned + total_huffman_bytes_used} "
+          f"bytes")
 
-    huffman_saves = total_char_used_for_vocabulary - (huffman_table_bytes + total_huffman_bytes_used)
-    print(f"Non huffman approach {total_char_used_for_vocabulary} bytes - huffman "
-          f"{huffman_table_bytes + total_huffman_bytes_used} bytes = huffman saves ~{huffman_saves} bytes (ignoring "
+    huffman_table_bits_streamed = \
+        len(huffman_table.items()) * (codeword_max_len_of_bits.bit_length() + delta_characters_ord.bit_length()) + \
+        total_bits_used_in_huffman_table_for_output_letter
+
+    huffman_table_bytes_streamed = int( (huffman_table_bits_streamed+4) / 8)
+
+    print(f"Huffman (streamed) huffman table size {len(huffman_table.items())} * (codeword bits length (encoded in bits) "
+          f"{codeword_max_len_of_bits.bit_length()} + output character delta ord in bits {delta_characters_ord.bit_length()})"
+          f" + all code words of the whole table summarized {total_bits_used_in_huffman_table_for_output_letter} = "
+          f"{huffman_table_bits_streamed} bits ({huffman_table_bytes_streamed} bytes)")
+
+    huffman_saves = total_char_used_for_vocabulary - (huffman_table_bytes_aligned + total_huffman_bytes_used)
+    print(f"Non huffman approach {total_char_used_for_vocabulary} bytes - huffman (aligned) "
+          f"{huffman_table_bytes_aligned + total_huffman_bytes_used} bytes = aligned huffman saves ~{huffman_saves} bytes (ignoring "
           f"the fact that huffman decoder needs to be implemented in the firmware)")
+
+    print(f"Streamed huffman table saves further {(huffman_table_bytes_aligned + total_huffman_bytes_used) - huffman_table_bytes_streamed} "
+           f"bytes ignoring the firmware differences to support this")
+
 
     header('Huffman table ordered for the firmware')
     for ch, code in sorted(huffman_table.items(), key=lambda x: (len(x[1]))):
