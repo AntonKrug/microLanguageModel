@@ -97,7 +97,7 @@ def count_words():
     if vocabulary_size == len(word_counts_total):
         print('Matching hard-coded vocabulary size')
     else:
-        print('Not matching the hard-coded vocabulary size', vocabulary_size)
+        print('Warning: Not matching the hard-coded vocabulary size', vocabulary_size)
 
     # --------------------- first words ------------------------------------
     header('Counting first word of each text')
@@ -146,6 +146,8 @@ def count_words():
     codeword_max_len_of_bits = 0
     character_ord_min = 255
     character_ord_max = 0
+    codeword_lengths_count = Counter()
+    codeword_lengths_sum = 0
     for ch, code in huffman_table.items():
         bits_used = len(code) * letter_counts_total[ch]
 
@@ -156,9 +158,17 @@ def count_words():
 
         if codeword_max_len_of_bits < len(code):
             codeword_max_len_of_bits = len(code)
+
+        codeword_lengths_count.update([str(len(code))])
+        codeword_lengths_sum += len(code)
         print(f"{ch!r} (ord {ord(ch):>3}): {code:>14}, length {len(code):>2} x frequency {letter_counts_total[ch]:>4} = {bits_used:>5} bits used in "
               f"total whole vocabulary to address this codeword")
 
+        total_huffman_table_codeword_bits_used += bits_used
+
+    print(f"Codeword length statistics", codeword_lengths_count)
+    codeword_lengths_max = int(max(codeword_lengths_count, key=codeword_lengths_count.get))-1 # we can offset by -1 as that is the minimum we would move anyway
+    print(f"Largest codeword length {codeword_lengths_max} (but needs to be offset by +1) ({codeword_lengths_max.bit_length()} bits to store this number)")
     delta_characters_ord = character_ord_max - character_ord_min
     print(f"Output character min ord {character_ord_min}, max ord {character_ord_max}, delta {delta_characters_ord}, "
           f"needing bits {delta_characters_ord.bit_length()}")
@@ -166,7 +176,7 @@ def count_words():
 
     # 2 bytes for codeword (upto 14bits) + 1 byte for codeword mask (only 4bits needed) + 1 byte for the output character
     huffman_table_bytes_aligned = 4 * len(huffman_table.items())
-    total_huffman_bytes_used = int( (total_huffman_table_codeword_bits_used + 4) / 8 )
+    total_huffman_bytes_used = int( (total_huffman_table_codeword_bits_used + 7) / 8 )
     print(f"Huffman (aligned) Codeword max length {codeword_max_len_of_bits}, total bits used as indexes to codewords "
           f"{total_huffman_table_codeword_bits_used}. Bytes used as indexes to codewords {total_huffman_bytes_used} + "
           f"huffman table {huffman_table_bytes_aligned} => total {huffman_table_bytes_aligned + total_huffman_bytes_used} "
@@ -174,17 +184,18 @@ def count_words():
 
     huffman_table_bits_streamed = \
         len(huffman_table.items()) * (codeword_max_len_of_bits.bit_length() + delta_characters_ord.bit_length()) + \
-        total_bits_used_in_huffman_table_for_output_letter
+        codeword_lengths_sum
 
-    huffman_table_bytes_streamed = int( (huffman_table_bits_streamed+4) / 8)
+    huffman_table_bytes_streamed = int( (huffman_table_bits_streamed+7) / 8)
 
     print(f"Huffman (streamed) huffman table size {len(huffman_table.items())} * (codeword bits length (encoded in bits) "
           f"{codeword_max_len_of_bits.bit_length()} + output character delta ord in bits {delta_characters_ord.bit_length()})"
-          f" + all code words of the whole table summarized {total_bits_used_in_huffman_table_for_output_letter} = "
+          f" + all code words of the whole table summarized {codeword_lengths_sum} = "
           f"{huffman_table_bits_streamed} bits ({huffman_table_bytes_streamed} bytes)")
 
     huffman_saves = total_char_used_for_vocabulary - (huffman_table_bytes_aligned + total_huffman_bytes_used)
-    print(f"Non huffman approach {total_char_used_for_vocabulary} bytes - huffman (aligned) "
+
+    print(f"Non huffman approach {total_char_used_for_vocabulary} bytes - huffman (aligned table + indexes)  "
           f"{huffman_table_bytes_aligned + total_huffman_bytes_used} bytes = aligned huffman saves ~{huffman_saves} bytes (ignoring "
           f"the fact that huffman decoder needs to be implemented in the firmware)")
 
@@ -199,12 +210,22 @@ def count_words():
 
     header('Huffman (streamed) payload ')
     stream_payload = ''
+    max_entry_len = 0
     for ch, code in sorted_huffman_table:
         # current_entry = str(bin(len(code))) + str(code) + str(bin(ord(ch)-character_ord_min))
-        current_entry = f"{len(code):0{codeword_max_len_of_bits.bit_length()}b}{code}{(ord(ch)-character_ord_min):b}"
-        print(f"Entry for {ch} = {current_entry} (len={len(code):0{codeword_max_len_of_bits.bit_length()}b} code={code} "
-              f"char_delta={(ord(ch)-character_ord_min):b} + char_offset={character_ord_min})")
+        current_entry = f"{len(code):0{codeword_max_len_of_bits.bit_length()}b}{code}{(ord(ch)-character_ord_min):0{delta_characters_ord.bit_length()}b}"
+
+        if max_entry_len < len(current_entry):
+            max_entry_len = len(current_entry)
+
+        print(f"Entry for {ch} = {current_entry:<24} (len={len(code):0{codeword_max_len_of_bits.bit_length()}b} "
+              f"code={code:<{codeword_max_len_of_bits}} "
+              f"char_delta={(ord(ch)-character_ord_min):0{delta_characters_ord.bit_length()}b} + "
+              f"char_offset={character_ord_min})")
+
         stream_payload += current_entry
+
+    print(f"Max entry length = {max_entry_len} (firmware needs to hold at least this amount of bits)");
 
     # Calculate how many bits to pad to reach multiple of 8
     pad_len = (8 - len(stream_payload) % 8) %8  # %8 handles exact multiples of bytes
@@ -224,7 +245,9 @@ def count_words():
 
     print(f"As {len(hex_chunks)} 8-bit hex chunks:")
 
-    print(f"static constexpr std::array<std::uint8_t,{len(hex_chunks)}> huffman_table{{", end="")
+    print(f"static constexpr std::uint8_t max_codeword_bits_length_bits = {codeword_max_len_of_bits.bit_length()};")
+    print(f"static constexpr std::uint8_t vocabulary_huffman_character_offset = {character_ord_min};")
+    print(f"static constexpr std::array<std::uint8_t,{len(hex_chunks)}> vocabulary_huffman_stream{{", end="")
     comma = ''
     for chunk in hex_chunks:
         print(f"{comma}0x{chunk}", end="")
