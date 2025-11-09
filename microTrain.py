@@ -201,13 +201,14 @@ def count_words():
     stream_payload = ''
     for ch, code in sorted_huffman_table:
         # current_entry = str(bin(len(code))) + str(code) + str(bin(ord(ch)-character_ord_min))
-        current_entry = f"{len(code):b}{code}{(ord(ch)-character_ord_min):b}"
-        print(f"Entry for {ch} = {current_entry}")
+        current_entry = f"{len(code):0{codeword_max_len_of_bits.bit_length()}b}{code}{(ord(ch)-character_ord_min):b}"
+        print(f"Entry for {ch} = {current_entry} (len={len(code):0{codeword_max_len_of_bits.bit_length()}b} code={code} "
+              f"char_delta={(ord(ch)-character_ord_min):b} + char_offset={character_ord_min})")
         stream_payload += current_entry
 
-    # Calculate how many bits to pad to reach multiple of 32
-    pad_len = (32 - len(stream_payload) % 32)  # %32 handles exact multiple
-    print(f"Stream needs to be padded with {pad_len} zeros")
+    # Calculate how many bits to pad to reach multiple of 8
+    pad_len = (8 - len(stream_payload) % 8) %8  # %8 handles exact multiples of bytes
+    print(f"Stream needs to be padded with {pad_len} zeros for byte aligned")
     stream_payload = stream_payload + "0" * pad_len
 
     print(f"Final combined streamed payload in bits {stream_payload}")
@@ -216,19 +217,19 @@ def count_words():
     print(f"As one whole hex string {hex_str}")
 
     hex_chunks = []
-    for i in range(0, len(stream_payload), 32):
-        chunk = stream_payload[i:i + 32]
-        hex_chunk = hex(int(chunk, 2))[2:].zfill(8)  # 8 hex digits = 32 bits
+    for i in range(0, len(stream_payload), 8):
+        chunk = stream_payload[i:i + 8]
+        hex_chunk = hex(int(chunk, 2))[2:].zfill(2)  # 2 hex digits = 8 bits
         hex_chunks.append(hex_chunk)
 
-    print(f"As {len(hex_chunks)} 32-bit hex chunks:")
+    print(f"As {len(hex_chunks)} 8-bit hex chunks:")
 
-    print("[", end="")
+    print(f"static constexpr std::array<std::uint8_t,{len(hex_chunks)}> huffman_table{{", end="")
     comma = ''
     for chunk in hex_chunks:
         print(f"{comma}0x{chunk}", end="")
         comma = ', '
-    print("];")
+    print("};")
 
     return df
 
