@@ -169,6 +169,7 @@ def count_words():
     print(f"Codeword length statistics", codeword_lengths_count)
     codeword_lengths_max = int(max(codeword_lengths_count, key=codeword_lengths_count.get))-1 # we can offset by -1 as that is the minimum we would move anyway
     print(f"Largest codeword length {codeword_lengths_max} (but needs to be offset by +1) ({codeword_lengths_max.bit_length()} bits to store this number)")
+
     delta_characters_ord = character_ord_max - character_ord_min
     print(f"Output character min ord {character_ord_min}, max ord {character_ord_max}, delta {delta_characters_ord}, "
           f"needing bits {delta_characters_ord.bit_length()}")
@@ -212,7 +213,6 @@ def count_words():
     stream_payload = ''
     max_entry_len = 0
     for ch, code in sorted_huffman_table:
-        # current_entry = str(bin(len(code))) + str(code) + str(bin(ord(ch)-character_ord_min))
         current_entry = f"{len(code):0{codeword_max_len_of_bits.bit_length()}b}{code}{(ord(ch)-character_ord_min):0{delta_characters_ord.bit_length()}b}"
 
         if max_entry_len < len(current_entry):
@@ -253,6 +253,34 @@ def count_words():
         print(f"{comma}0x{chunk}", end="")
         comma = ', '
     print("};")
+
+    header('Huffman (streamed-packed) payload ')
+    stream_payload = ''
+    length = 0
+    for ch, code in sorted_huffman_table:
+        if length != len(code):
+            changing_size_payload = (f"{len(code):0{codeword_max_len_of_bits.bit_length()}b}"
+                                     f"{int(codeword_lengths_count[str(len(code))])-1:0{codeword_lengths_max.bit_length()}b}")
+            print(f"Size change payload:{changing_size_payload} len:{len(code)} repeated(-1):{codeword_lengths_count[str(len(code))]-1}")
+            stream_payload += changing_size_payload
+            length = len(code)
+
+        current_entry = f"{code}{(ord(ch)-character_ord_min):0{delta_characters_ord.bit_length()}b}"
+
+        print(f"Entry for {ch} = {current_entry:<20} ("
+              f"code={code:<{codeword_max_len_of_bits}} "
+              f"char_delta={(ord(ch)-character_ord_min):0{delta_characters_ord.bit_length()}b} + "
+              f"char_offset={character_ord_min})")
+
+        stream_payload += current_entry
+
+    # Calculate how many bits to pad to reach multiple of 8
+    print()
+    pad_len = (8 - len(stream_payload) % 8) %8  # %8 handles exact multiples of bytes
+    print(f"Stream needs to be padded with {pad_len} zeros for byte aligned")
+    stream_payload = stream_payload + "0" * pad_len
+    print(f"Stream size in {int(len(stream_payload)/8)} bytes")
+    print(f"Final combined stream payload in bits {stream_payload}")
 
     return df
 
