@@ -40,6 +40,12 @@ def _header(*args, **kwargs):
     print(*args, **kwargs)
 
 
+def _load_dataframe():
+    _header('Loading input json file as panda dataframe', input_data_json_file_name)
+    df = pandas.read_json(input_data_json_file_name)
+    return df
+
+
 def _word_count(df):
     _header("Counting words")
 
@@ -76,6 +82,39 @@ def _first_word_of_text(df):
         print(word, ' => ', first_word_total[word])
 
 
+def _letter_usage_statistics():
+    _header('Counting letter usage of all words')
+    for word in word_counts_total:
+        # there is ~12 bytes of savings in huffman tables if i would use single
+        # escape/shortcut characters for these 'once upon a time,' cases, but would
+        # spend more bytes in firmware to handle these edge cases. So it's better to
+        # have them inside the huffman table correctly without extra conditions in
+        # firmware
+        if word == 'onceuponatime,':
+            word = 'once upon a time,'
+            # word = '1'
+        elif word == 'oneday':
+            word = 'one day'
+            # word = '2'
+
+        # not multiplying by the letter usage because that will use indexes to whole vocabulary tokens
+        # count = word_counts_total[word]
+        # letters = Counter(word)
+        # letters *= count
+        # letter_counts_total.update(letters)
+        # letter_counts_total.update({'0': count})
+
+        letter_counts_total.update(word.upper())
+        letter_counts_total.update('0')
+
+    total_char_used_for_vocabulary = 0
+    for letter in sorted(letter_counts_total, key=letter_counts_total.get, reverse=True):
+        total_char_used_for_vocabulary += letter_counts_total[letter]
+        print(letter, ' => ', letter_counts_total[letter])
+    print(f"Total amount of characters used to store whole vocabulary: {total_char_used_for_vocabulary}")
+    return total_char_used_for_vocabulary
+
+
 def _build_huffman_table(counter):
     heap = []
     _count = count()
@@ -108,42 +147,10 @@ def _build_huffman_table(counter):
 
 
 def words_counts_and_stats():
-    _header('Loading input json file as panda dataframe', input_data_json_file_name)
-    df = pandas.read_json(input_data_json_file_name)
-
+    df = _load_dataframe()
     _word_count(df)
     _first_word_of_text(df)
-
-    # --------------------- letter statistics ------------------------------------
-    _header('Counting letter usage of all words')
-    for word in word_counts_total:
-        # there is ~12 bytes of savings in huffman tables if i would use single
-        # escape/shortcut characters for these 'once upon a time,' cases, but would
-        # spend more bytes in firmware to handle these edge cases. So it's better to
-        # have them inside the huffman table correctly without extra conditions in
-        # firmware
-        if word == 'onceuponatime,':
-            word = 'once upon a time,'
-            # word = '1'
-        elif word == 'oneday':
-            word = 'one day'
-            # word = '2'
-
-        # not multiplying by the letter usage because that will use indexes to whole vocabulary tokens
-        # count = word_counts_total[word]
-        # letters = Counter(word)
-        # letters *= count
-        # letter_counts_total.update(letters)
-        # letter_counts_total.update({'0': count})
-
-        letter_counts_total.update(word.upper())
-        letter_counts_total.update('0')
-
-    total_char_used_for_vocabulary = 0
-    for letter in sorted(letter_counts_total, key=letter_counts_total.get, reverse=True):
-        total_char_used_for_vocabulary += letter_counts_total[letter]
-        print(letter, ' => ', letter_counts_total[letter])
-    print(f"Total amount of characters used to store whole vocabulary: {total_char_used_for_vocabulary}")
+    total_char_used_for_vocabulary = _letter_usage_statistics()
 
     _header('Huffman table creation')
     huffman_table = _build_huffman_table(letter_counts_total)
