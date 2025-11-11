@@ -40,7 +40,43 @@ def _header(*args, **kwargs):
     print(*args, **kwargs)
 
 
-def build_huffman_table(counter):
+def _word_count(df):
+    _header("Counting words")
+
+    print('Splitting texts to words')
+    df['words'] = df['text'].apply(_panda_split_to_words)
+
+    print('Counting words in each text')
+    df['word_counts'] = df['words'].apply(Counter)
+
+    print('Adding up words for all texts')
+    for count_in_one_text in df['words']:
+        word_counts_total.update(count_in_one_text)
+
+    i = 1
+    for word in sorted(word_counts_total, key=word_counts_total.get, reverse=True):
+        print(i, word, ' => ', word_counts_total[word])
+        i=i+1
+
+    print('Words used in texts', len(word_counts_total))
+    if vocabulary_size == len(word_counts_total):
+        print('Matching hard-coded vocabulary size')
+    else:
+        print('Warning: Not matching the hard-coded vocabulary size', vocabulary_size)
+
+
+def _first_word_of_text(df):
+    _header('Counting first word of each text')
+    df['first'] = df['text'].apply(_panda_first_word)
+
+    for first in df['first']:
+        first_word_total.update([first])
+
+    for word in sorted(first_word_total, key=first_word_total.get, reverse=True):
+        print(word, ' => ', first_word_total[word])
+
+
+def _build_huffman_table(counter):
     heap = []
     _count = count()
 
@@ -71,43 +107,12 @@ def build_huffman_table(counter):
     return table
 
 
-def count_words():
+def words_counts_and_stats():
     _header('Loading input json file as panda dataframe', input_data_json_file_name)
     df = pandas.read_json(input_data_json_file_name)
 
-    #---------------------- word count -------------------------------
-    _header("Counting words")
-
-    print('Splitting texts to words')
-    df['words'] = df['text'].apply(_panda_split_to_words)
-
-    print('Counting words in each text')
-    df['word_counts'] = df['words'].apply(Counter)
-
-    print('Adding up words for all texts')
-    for count_in_one_text in df['words']:
-        word_counts_total.update(count_in_one_text)
-
-    i = 1
-    for word in sorted(word_counts_total, key=word_counts_total.get, reverse=True):
-        print(i, word, ' => ', word_counts_total[word])
-        i=i+1
-
-    print('Words used in texts', len(word_counts_total))
-    if vocabulary_size == len(word_counts_total):
-        print('Matching hard-coded vocabulary size')
-    else:
-        print('Warning: Not matching the hard-coded vocabulary size', vocabulary_size)
-
-    # --------------------- first words ------------------------------------
-    _header('Counting first word of each text')
-    df['first'] = df['text'].apply(_panda_first_word)
-
-    for first in df['first']:
-        first_word_total.update([first])
-
-    for word in sorted(first_word_total, key=first_word_total.get, reverse=True):
-        print(word, ' => ', first_word_total[word])
+    _word_count(df)
+    _first_word_of_text(df)
 
     # --------------------- letter statistics ------------------------------------
     _header('Counting letter usage of all words')
@@ -141,7 +146,7 @@ def count_words():
     print(f"Total amount of characters used to store whole vocabulary: {total_char_used_for_vocabulary}")
 
     _header('Huffman table creation')
-    huffman_table = build_huffman_table(letter_counts_total)
+    huffman_table = _build_huffman_table(letter_counts_total)
     total_huffman_table_codeword_bits_used = 0
     codeword_max_len_of_bits = 0
     character_ord_min = 255
@@ -331,11 +336,11 @@ def vocabulary_creation():
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("function", type=str, choices=["count_words", "plain_text", "vocabulary_creation"])
+    parser.add_argument("function", type=str, choices=["words_counts_and_stats", "plain_text", "vocabulary_creation"])
     args = parser.parse_args()
 
-    if args.function == "count_words":
-        count_words()
+    if args.function == "words_counts_and_stats":
+        words_counts_and_stats()
     elif args.function == "plain_text":
         plain_text()
     elif args.function == "vocabulary_creation":
