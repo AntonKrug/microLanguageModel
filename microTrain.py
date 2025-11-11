@@ -199,7 +199,7 @@ def count_words():
           f"{huffman_table_bytes_aligned + total_huffman_bytes_used} bytes = aligned huffman saves ~{huffman_saves} bytes (ignoring "
           f"the fact that huffman decoder needs to be implemented in the firmware)")
 
-    print(f"Streamed huffman table saves further {(huffman_table_bytes_aligned + total_huffman_bytes_used) - huffman_table_bytes_streamed} "
+    print(f"Streamed huffman table saves further {huffman_table_bytes_aligned - huffman_table_bytes_streamed} "
            f"bytes ignoring the firmware differences to support this")
 
 
