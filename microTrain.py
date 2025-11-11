@@ -19,13 +19,13 @@ word_counts_total = Counter()
 first_word_total = Counter()
 letter_counts_total = Counter()
 
-def panda_split_to_words(text):
+def _panda_split_to_words(text):
     # text = re.sub(r"[^\w\s']", '', text)  # remove punctuation
     words = text.split()
     return Counter(words)
 
 
-def panda_first_word(text):
+def _panda_first_word(text):
     words = text.split()
     if len(words) > 0:
         return words[0]
@@ -34,7 +34,7 @@ def panda_first_word(text):
         return "_ERROR_"
 
 
-def header(*args, **kwargs):
+def _header(*args, **kwargs):
     print()
     print("-"*70)
     print(*args, **kwargs)
@@ -72,14 +72,14 @@ def build_huffman_table(counter):
 
 
 def count_words():
-    header('Loading input json file as panda dataframe', input_data_json_file_name)
+    _header('Loading input json file as panda dataframe', input_data_json_file_name)
     df = pandas.read_json(input_data_json_file_name)
 
     #---------------------- word count -------------------------------
-    header("Counting words")
+    _header("Counting words")
 
     print('Splitting texts to words')
-    df['words'] = df['text'].apply(panda_split_to_words)
+    df['words'] = df['text'].apply(_panda_split_to_words)
 
     print('Counting words in each text')
     df['word_counts'] = df['words'].apply(Counter)
@@ -100,8 +100,8 @@ def count_words():
         print('Warning: Not matching the hard-coded vocabulary size', vocabulary_size)
 
     # --------------------- first words ------------------------------------
-    header('Counting first word of each text')
-    df['first'] = df['text'].apply(panda_first_word)
+    _header('Counting first word of each text')
+    df['first'] = df['text'].apply(_panda_first_word)
 
     for first in df['first']:
         first_word_total.update([first])
@@ -110,7 +110,7 @@ def count_words():
         print(word, ' => ', first_word_total[word])
 
     # --------------------- letter statistics ------------------------------------
-    header('Counting letter usage of all words')
+    _header('Counting letter usage of all words')
     for word in word_counts_total:
         # there is ~12 bytes of savings in huffman tables if i would use single
         # escape/shortcut characters for these 'once upon a time,' cases, but would
@@ -140,7 +140,7 @@ def count_words():
         print(letter, ' => ', letter_counts_total[letter])
     print(f"Total amount of characters used to store whole vocabulary: {total_char_used_for_vocabulary}")
 
-    header('Huffman table creation')
+    _header('Huffman table creation')
     huffman_table = build_huffman_table(letter_counts_total)
     total_huffman_table_codeword_bits_used = 0
     codeword_max_len_of_bits = 0
@@ -204,12 +204,12 @@ def count_words():
            f"bytes ignoring the firmware differences to support this")
 
 
-    header('Huffman (aligned) table ordered for the firmware')
+    _header('Huffman (aligned) table ordered for the firmware')
     sorted_huffman_table = sorted(huffman_table.items(), key=lambda x: (len(x[1])))
     for ch, code in sorted_huffman_table:
         print(f"{{ .code=0'b{code.ljust(16, '0')}, .bits={str(len(code)).zfill(2)} .character='{ch}' }}, // {code}")
 
-    header('Huffman (streamed) payload ')
+    _header('Huffman (streamed) payload ')
     stream_payload = ''
     max_entry_len = 0
     for ch, code in sorted_huffman_table:
@@ -254,7 +254,7 @@ def count_words():
         comma = ', '
     print("};")
 
-    header('Huffman (streamed-packed) payload ')
+    _header('Huffman (streamed-packed) payload ')
     stream_payload = ''
     length = 0
     for ch, code in sorted_huffman_table:
@@ -286,12 +286,12 @@ def count_words():
 
 
 def plain_text():
-    header('Loading input json file', input_data_json_file_name)
+    _header('Loading input json file', input_data_json_file_name)
     input_json_file = open(input_data_json_file_name, 'r')
     input_sentences = json.load(input_json_file)
     input_json_file.close()
 
-    header('Parsing to a plain text file', plain_text_data_file_name)
+    _header('Parsing to a plain text file', plain_text_data_file_name)
     plain_file = open(plain_text_data_file_name, 'w')
     for text in input_sentences:
         text = text["text"]
@@ -302,7 +302,7 @@ def plain_text():
 
 
 def vocabulary_creation():
-    header("Preparing vocabulary tokens")
+    _header("Preparing vocabulary tokens")
     # https://github.com/google/sentencepiece
     # https://colab.research.google.com/github/google/sentencepiece/blob/master/python/sentencepiece_python_module_example.ipynb
     # https://speechbrain.readthedocs.io/en/latest/API/speechbrain.tokenizers.SentencePiece.html
