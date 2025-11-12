@@ -164,7 +164,7 @@ def _huffman_stream_as_padded_cpp(prefix, stream_payload, codeword_max_len_of_bi
     print(f"As {len(hex_chunks)} 8-bit hex chunks:")
 
     print(f"static constexpr std::uint8_t {prefix}_max_codeword_bits_length_bits = {codeword_max_len_of_bits.bit_length()};"
-          f"// codewords have different sizes (of bits), ")
+          f"// codewords have different sizes (of bits), figure out how many bits needed to store the biggest one")
     print(f"static constexpr std::uint8_t {prefix}_vocabulary_huffman_character_offset = {character_ord_min};")
     print(f"static constexpr std::array<std::uint8_t,{len(hex_chunks)}> {prefix}_vocabulary_huffman_stream{{", end="")
     comma = ''
