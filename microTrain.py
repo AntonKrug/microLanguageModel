@@ -145,6 +145,35 @@ def _build_huffman_table(counter):
     assign_codes(root)
     return table
 
+def _huffman_stream_as_padded_cpp(prefix, stream_payload, codeword_max_len_of_bits, character_ord_min):
+    pad_len = (8 - len(stream_payload) % 8) %8  # %8 handles exact multiples of bytes
+    print(f"Stream needs to be padded with {pad_len} zeros for byte aligned")
+    stream_payload = stream_payload + "0" * pad_len
+
+    print(f"Final combined streamed payload in bits {stream_payload}")
+
+    hex_str = hex(int(stream_payload, 2))[2:]  # remove '0x' prefix
+    print(f"As one whole hex string {hex_str}")
+
+    hex_chunks = []
+    for i in range(0, len(stream_payload), 8):
+        chunk = stream_payload[i:i + 8]
+        hex_chunk = hex(int(chunk, 2))[2:].zfill(2)  # 2 hex digits = 8 bits
+        hex_chunks.append(hex_chunk)
+
+    print(f"As {len(hex_chunks)} 8-bit hex chunks:")
+
+    print(f"static constexpr std::uint8_t {prefix}_max_codeword_bits_length_bits = {codeword_max_len_of_bits.bit_length()};"
+          f"// codewords have different sizes (of bits), ")
+    print(f"static constexpr std::uint8_t {prefix}_vocabulary_huffman_character_offset = {character_ord_min};")
+    print(f"static constexpr std::array<std::uint8_t,{len(hex_chunks)}> {prefix}_vocabulary_huffman_stream{{", end="")
+    comma = ''
+    for chunk in hex_chunks:
+        print(f"{comma}0x{chunk}", end="")
+        comma = ', '
+    print("};")
+    return len(hex_chunks)
+
 
 def words_counts_and_stats():
     df = _load_dataframe()
@@ -238,33 +267,7 @@ def words_counts_and_stats():
         stream_payload += current_entry
 
     print(f"Max entry length = {max_entry_len} (firmware needs to hold at least this amount of bits)");
-
-    # Calculate how many bits to pad to reach multiple of 8
-    pad_len = (8 - len(stream_payload) % 8) %8  # %8 handles exact multiples of bytes
-    print(f"Stream needs to be padded with {pad_len} zeros for byte aligned")
-    stream_payload = stream_payload + "0" * pad_len
-
-    print(f"Final combined streamed payload in bits {stream_payload}")
-
-    hex_str = hex(int(stream_payload, 2))[2:]  # remove '0x' prefix
-    print(f"As one whole hex string {hex_str}")
-
-    hex_chunks = []
-    for i in range(0, len(stream_payload), 8):
-        chunk = stream_payload[i:i + 8]
-        hex_chunk = hex(int(chunk, 2))[2:].zfill(2)  # 2 hex digits = 8 bits
-        hex_chunks.append(hex_chunk)
-
-    print(f"As {len(hex_chunks)} 8-bit hex chunks:")
-
-    print(f"static constexpr std::uint8_t max_codeword_bits_length_bits = {codeword_max_len_of_bits.bit_length()};")
-    print(f"static constexpr std::uint8_t vocabulary_huffman_character_offset = {character_ord_min};")
-    print(f"static constexpr std::array<std::uint8_t,{len(hex_chunks)}> vocabulary_huffman_stream{{", end="")
-    comma = ''
-    for chunk in hex_chunks:
-        print(f"{comma}0x{chunk}", end="")
-        comma = ', '
-    print("};")
+    hex_chunks_len = _huffman_stream_as_padded_cpp("stream", stream_payload, codeword_max_len_of_bits, character_ord_min)
 
     _header('Huffman (streamed-packed) payload ')
     stream_payload = ''
@@ -293,6 +296,8 @@ def words_counts_and_stats():
     stream_payload = stream_payload + "0" * pad_len
     print(f"Stream size in {int(len(stream_payload)/8)} bytes")
     print(f"Final combined stream payload in bits {stream_payload}")
+
+    hex_chunks_len = _huffman_stream_as_padded_cpp("packed_stream", stream_payload, codeword_max_len_of_bits, character_ord_min)
 
     return df
 
