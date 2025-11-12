@@ -9,7 +9,7 @@ import re
 import pandas
 import sentencepiece
 
-vocabulary_size = 4008
+vocabulary_size = 3169
 
 input_data_json_file_name = os.path.join("data-input", "sentences.json")
 plain_text_data_file_name = os.path.join("data-work", "plain_text_sentences.txt")
@@ -332,7 +332,7 @@ def vocabulary_creation():
     sentencepiece.SentencePieceTrainer.train(input=plain_text_data_file_name,
                                              model_prefix=vocabulary_file_name,
                                              model_type="word",
-                                             vocab_size=vocabulary_size + 1, # UNK and BOS
+                                             vocab_size=vocabulary_size + 2, # +2 for UNK and BOS
                                              self_test_sample_size=0,
                                              input_format="text",
                                              character_coverage=1.0,
