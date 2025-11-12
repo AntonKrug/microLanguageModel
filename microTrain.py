@@ -138,9 +138,9 @@ def _build_huffman_table(counter):
         if isinstance(node, str):
             table[node] = prefix or "0"  # single-character case
         else:
-            left, right = node
-            assign_codes(left, prefix + "0")
-            assign_codes(right, prefix + "1")
+            new_left, new_right = node
+            assign_codes(new_left, prefix + "0")
+            assign_codes(new_right, prefix + "1")
 
     assign_codes(root)
     return table
