@@ -7,23 +7,56 @@ import numpy
 import os
 import re
 
-
 import pandas
 import sentencepiece
 from sentencepiece import SentencePieceProcessor
+import torch
+from torch import nn
+from torch.nn import functional
 
+# model params
 vocabulary_size = 3169
 vocabulary_size_all_tokens = vocabulary_size + 2 # +2 for UNK and BOS
 
+kv_heads = 4  # 4 key and value heads
+q_to_kv_heads_ratio = 2  # end up with 2 queries per 1 key
+
+attention_heads = kv_heads * q_to_kv_heads_ratio  # grouped query attention (GQA) - 8 query heads (rotary) for 4 key (rotary) and 4 value
+dimensions_per_head = 8  # how many dimensions from the token each query head will be assigned with
+vocabulary_dimensions = attention_heads * dimensions_per_head  # size of vector associated with each token
+
+token_limit = 50  # limit of the context token window
+transformer_layers = 6  # how many copies of the whole transformer stack are there
+normalization_epsilon = 1e-5 # for RootMeanSquareNormalization
+
+# training
+learning_rate = 0.001
+dropout = 0.05
+weight_decay = 0.01
+multiple_of = 1
+
+# files
 input_data_json_file_name = os.path.join("data-input", "sentences.json")
 plain_text_data_file_name = os.path.join("data-work", "plain_text_sentences.txt")
 vocabulary_file_name =  os.path.join("data-work", "vocabulary")
 vocabulary_file_model_name = vocabulary_file_name + ".model"
 token_data_file_name = os.path.join("data-work", "sentences.tokens")
 
+# global variables
 word_counts_total = Counter()
 first_word_total = Counter()
 letter_counts_total = Counter()
+
+
+class RootMeanSquareNormalization(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.weight = nn.Parameter(torch.ones(vocabulary_dimensions))
+
+    def forward(self, x):
+        out = x.float() * torch.rsqrt(x.float().pow(2).mean(-1, keepdim=True) + normalization_epsilon)
+        return out.type_as(x) * self.weight
+
 
 def _panda_split_to_words(text):
     # text = re.sub(r"[^\w\s']", '', text)  # remove punctuation
@@ -335,6 +368,7 @@ def vocabulary_creation():
     # https://github.com/google/sentencepiece/blob/master/src/sentencepiece_model.proto#L193
     # https://github.com/google/sentencepiece/blob/master/python/add_new_vocab.ipynb
     # https://github.com/google/sentencepiece/issues/636
+    # https://stackoverflow.com/questions/77036828/some-doubts-about-sentencepiece
 
     sentencepiece.SentencePieceTrainer.train(input=plain_text_data_file_name,
                                              model_prefix=vocabulary_file_name,
@@ -374,15 +408,9 @@ def to_tokens():
         f.write(final_tokens.tobytes())
 
 def train():
-    vocabulary_dimensions = 64
-    layers = 6
-    heads = 8
-    kv_heads = 4
-    learning_rate = 0.001
-    dropout = 0.05
-    weight_decay = 0.01
-    multiple_of = 1
-    max_seq_len = 50
+
+    torch.set_default_dtype(torch.bfloat16)
+    torch.set_default_device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 if __name__ == "__main__":
