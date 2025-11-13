@@ -3,17 +3,23 @@ import heapq
 from collections import OrderedDict, Counter
 from itertools import count
 import json
+import numpy
 import os
 import re
 
+
 import pandas
 import sentencepiece
+from sentencepiece import SentencePieceProcessor
 
 vocabulary_size = 3169
+vocabulary_size_all_tokens = vocabulary_size + 2 # +2 for UNK and BOS
 
 input_data_json_file_name = os.path.join("data-input", "sentences.json")
 plain_text_data_file_name = os.path.join("data-work", "plain_text_sentences.txt")
 vocabulary_file_name =  os.path.join("data-work", "vocabulary")
+vocabulary_file_model_name = vocabulary_file_name + ".model"
+token_data_file_name = os.path.join("data-work", "sentences.tokens")
 
 word_counts_total = Counter()
 first_word_total = Counter()
@@ -328,11 +334,12 @@ def vocabulary_creation():
     # https://github.com/google/sentencepiece/issues/121
     # https://github.com/google/sentencepiece/blob/master/src/sentencepiece_model.proto#L193
     # https://github.com/google/sentencepiece/blob/master/python/add_new_vocab.ipynb
+    # https://github.com/google/sentencepiece/issues/636
 
     sentencepiece.SentencePieceTrainer.train(input=plain_text_data_file_name,
                                              model_prefix=vocabulary_file_name,
                                              model_type="word",
-                                             vocab_size=vocabulary_size + 2, # +2 for UNK and BOS
+                                             vocab_size=vocabulary_size_all_tokens,
                                              self_test_sample_size=0,
                                              input_format="text",
                                              character_coverage=1.0,
@@ -346,9 +353,29 @@ def vocabulary_creation():
                                              normalization_rule_name="identity")
 
 
+def to_tokens():
+    _header("Loading vocabulary tokenizer model")
+    sentencepiece_model = SentencePieceProcessor(model_file = vocabulary_file_model_name)
+
+    _header('Loading input json file to parse json into tokens', input_data_json_file_name)
+    input_json_file = open(input_data_json_file_name, 'r')
+    all_texts = json.load(input_json_file)
+
+    _header('Tokenizing input text and saving it as byte data to', token_data_file_name)
+    final_tokens = []
+    for entry in all_texts:
+        tokens = [1] + sentencepiece_model.encode(entry["text"])
+        # print(tokens)
+        final_tokens.extend(tokens)
+
+    final_tokens = numpy.array(final_tokens, dtype=numpy.uint16)
+
+    with open(token_data_file_name, "wb") as f:
+        f.write(final_tokens.tobytes())
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("function", type=str, choices=["words_counts_and_stats", "plain_text", "vocabulary_creation"])
+    parser.add_argument("function", type=str, choices=["words_counts_and_stats", "plain_text", "vocabulary_creation","to_tokens"])
     args = parser.parse_args()
 
     if args.function == "words_counts_and_stats":
@@ -357,6 +384,8 @@ if __name__ == "__main__":
         plain_text()
     elif args.function == "vocabulary_creation":
         vocabulary_creation()
+    elif args.function == "to_tokens":
+        to_tokens()
     else:
         raise ValueError(f"Unknown argument {args.function}")
 
