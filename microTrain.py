@@ -29,6 +29,12 @@ token_limit = 50  # limit of the context token window
 transformer_layers = 6  # how many copies of the whole transformer stack are there
 normalization_epsilon = 1e-5 # for RootMeanSquareNormalization
 
+hidden_feed_forward_network_multiply_of = 64
+hidden_feed_forward_network_dimensions = (8 * vocabulary_dimensions) // 2
+#round up so hidden dimensions will be whole `multiply_of`
+ffn_rounding_up = (hidden_feed_forward_network_multiply_of - (hidden_feed_forward_network_dimensions % hidden_feed_forward_network_multiply_of)) % hidden_feed_forward_network_multiply_of
+hidden_feed_forward_network_dimensions += ffn_rounding_up
+
 # training
 learning_rate = 0.001
 dropout = 0.05
@@ -57,6 +63,15 @@ class RootMeanSquareNormalization(torch.nn.Module):
         out = x.float() * torch.rsqrt(x.float().pow(2).mean(-1, keepdim=True) + normalization_epsilon)
         return out.type_as(x) * self.weight
 
+class SwiGlu(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.w    = nn.Linear(vocabulary_dimensions, hidden_feed_forward_network_dimensions, bias=False)
+        self.v    = nn.Linear(vocabulary_dimensions, hidden_feed_forward_network_dimensions, bias=False)
+        self.back = nn.Linear(hidden_feed_forward_network_dimensions, vocabulary_dimensions, bias=False)
+
+    def forward(self, x):
+        return self.back(functional.silu(self.w(x)) * self.v(x))
 
 def _panda_split_to_words(text):
     # text = re.sub(r"[^\w\s']", '', text)  # remove punctuation
