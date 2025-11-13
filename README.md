@@ -22,6 +22,7 @@ Including the versions which worked for me quick justification/explanations why:
   - `pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cu130`
   - If getting `ERROR: No matching distribution found for typing-extensions>=4.10.0` then `python -m pip install --upgrade pip` should fix it
 - Pandas `pip install pandas`
+- Numpy `pip install numpy`
 - SentencePiece `pip install sentencepiece` https://github.com/google/sentencepiece 
   - If we want to build our own protobuf (protobufer protoc) to read/modify the vocabulary `winget install protobuf` https://protobuf.dev/installation/
   - And to use the protoc `protoc --python_out=. sentencepiece_model.proto`
