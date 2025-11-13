@@ -373,9 +373,21 @@ def to_tokens():
     with open(token_data_file_name, "wb") as f:
         f.write(final_tokens.tobytes())
 
+def train():
+    vocabulary_dimensions = 64
+    layers = 6
+    heads = 8
+    kv_heads = 4
+    learning_rate = 0.001
+    dropout = 0.05
+    weight_decay = 0.01
+    multiple_of = 1
+    max_seq_len = 50
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("function", type=str, choices=["words_counts_and_stats", "plain_text", "vocabulary_creation","to_tokens"])
+    parser.add_argument("function", type=str, choices=["words_counts_and_stats", "plain_text", "vocabulary_creation","to_tokens","train"])
     args = parser.parse_args()
 
     if args.function == "words_counts_and_stats":
@@ -386,6 +398,8 @@ if __name__ == "__main__":
         vocabulary_creation()
     elif args.function == "to_tokens":
         to_tokens()
+    elif args.function == "train":
+        train()
     else:
         raise ValueError(f"Unknown argument {args.function}")
 
