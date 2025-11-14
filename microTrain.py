@@ -18,10 +18,10 @@ from torch.nn import functional
 vocabulary_size = 3169
 vocabulary_size_all_tokens = vocabulary_size + 2 # +2 for UNK and BOS
 
-kv_heads = 4  # 4 key and value heads
-q_to_kv_heads_ratio = 2  # end up with 2 queries per 1 key
+key_value_heads = 4  # 4 key and value heads
+key_value_to_query_heads_ratio = 2  # end up with 2 queries per 1 key
 
-attention_heads = kv_heads * q_to_kv_heads_ratio  # grouped query attention (GQA) - 8 query heads (rotary) for 4 key (rotary) and 4 value
+attention_heads = key_value_heads * key_value_to_query_heads_ratio  # grouped query attention (GQA) - 8 query heads (rotary) for 4 key (rotary) and 4 value
 dimensions_per_head = 8  # how many dimensions from the token each query head will be assigned with
 vocabulary_dimensions = attention_heads * dimensions_per_head  # size of vector associated with each token
 
@@ -83,24 +83,43 @@ def _reshape_for_broadcast(freqs_cis, x):
     return freqs_cis.view(shape)
 
 
-def _apply_rotary_query_emb(q, freqs_cos, freqs_sin):
-    r, i = q.float().reshape(q.shape[:-1] + (-1, 2)).unbind(-1)
-    freqs_cos = _reshape_for_broadcast(freqs_cos, r)
-    freqs_sin = _reshape_for_broadcast(freqs_sin, r)
-    out_r = r * freqs_cos - i * freqs_sin
-    out_i = r * freqs_sin + i * freqs_cos
-    out = torch.stack([out_r, out_i], dim=-1).flatten(3)
+def _apply_rotary_position_embedding_query(query, freqs_cos, freqs_sin):
+    # https://pub.towardsai.net/llama-architecture-a-deep-dive-into-efficiency-and-mathematics-9c95c0e4bf8b
+    # https://pypi.org/project/rotary-embedding-tensorflow/
+    real, imaginary = query.float().reshape(query.shape[:-1] + (-1, 2)).unbind(-1)
 
-    return out.type_as(q), freqs_cos, freqs_sin
+    freqs_cos = _reshape_for_broadcast(freqs_cos, real)
+    freqs_sin = _reshape_for_broadcast(freqs_sin, real)
+
+    out_real      = real * freqs_cos - imaginary * freqs_sin
+    out_imaginary = real * freqs_sin + imaginary * freqs_cos
+
+    out = torch.stack([out_real, out_imaginary], dim=-1).flatten(3)
+
+    return out.type_as(query), freqs_cos, freqs_sin
 
 
-def _apply_rotary_key_emb(k, freqs_cos, freqs_sin):
-    r, i = k.float().reshape(k.shape[:-1] + (-1, 2)).unbind(-1)
-    out_r = r * freqs_cos - i * freqs_sin
-    out_i = r * freqs_sin + i * freqs_cos
-    out = torch.stack([out_r, out_i], dim=-1).flatten(3)
+def _apply_rotary_position_embedding_key(key, freqs_cos, freqs_sin):
+    real, imaginary = key.float().reshape(key.shape[:-1] + (-1, 2)).unbind(-1)
+
+    out_real      = real * freqs_cos - imaginary * freqs_sin
+    out_imaginary = real * freqs_sin + imaginary * freqs_cos
+
+    out = torch.stack([out_real, out_imaginary], dim=-1).flatten(3)
 
     return out.type_as(key)
+
+
+def _reshape_key_value(x, scale_ratio) -> torch.Tensor:
+    if scale_ratio == 1:
+        # will not need to change shape, just return as is
+        return x
+
+    return (
+        x[:, :, :, None, :]
+        .expand(batch_size, token_limit, key_value_heads, scale_ratio, dimensions_per_head)
+        .reshape(batch_size, token_limit, key_value_heads * scale_ratio, dimensions_per_head)
+    )
 
 
 def _panda_split_to_words(text):
