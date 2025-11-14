@@ -36,6 +36,7 @@ ffn_rounding_up = (hidden_feed_forward_network_multiply_of - (hidden_feed_forwar
 hidden_feed_forward_network_dimensions += ffn_rounding_up
 
 # training
+batch_size = 500
 learning_rate = 0.001
 dropout = 0.05
 weight_decay = 0.01
@@ -72,6 +73,29 @@ class SwiGlu(nn.Module):
 
     def forward(self, x):
         return self.back(functional.silu(self.w(x)) * self.v(x))
+
+
+def _reshape_for_broadcast(freqs_cis, x):
+    ndim = x.ndim
+    assert 0 <= 1 < ndim
+    assert freqs_cis.shape == (x.shape[1], x.shape[-1])
+    shape = [d if i == 1 or i == ndim - 1 else 1 for i, d in enumerate(x.shape)]
+    return freqs_cis.view(shape)
+
+
+def _apply_rotary_query_emb(q, freqs_cos, freqs_sin):
+        r, i = q.float().reshape(q.shape[:-1] + (-1, 2)).unbind(-1)
+
+        freqs_cos = _reshape_for_broadcast(freqs_cos, r)
+        freqs_sin = _reshape_for_broadcast(freqs_sin, r)
+
+        xq_out_r = r * freqs_cos - i * freqs_sin
+        xq_out_i = r * freqs_sin + i * freqs_cos
+
+        xq_out = torch.stack([xq_out_r, xq_out_i], dim=-1).flatten(3)
+
+        return xq_out.type_as(q)
+
 
 def _panda_split_to_words(text):
     # text = re.sub(r"[^\w\s']", '', text)  # remove punctuation
