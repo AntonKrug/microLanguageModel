@@ -84,17 +84,23 @@ def _reshape_for_broadcast(freqs_cis, x):
 
 
 def _apply_rotary_query_emb(q, freqs_cos, freqs_sin):
-        r, i = q.float().reshape(q.shape[:-1] + (-1, 2)).unbind(-1)
+    r, i = q.float().reshape(q.shape[:-1] + (-1, 2)).unbind(-1)
+    freqs_cos = _reshape_for_broadcast(freqs_cos, r)
+    freqs_sin = _reshape_for_broadcast(freqs_sin, r)
+    out_r = r * freqs_cos - i * freqs_sin
+    out_i = r * freqs_sin + i * freqs_cos
+    out = torch.stack([out_r, out_i], dim=-1).flatten(3)
 
-        freqs_cos = _reshape_for_broadcast(freqs_cos, r)
-        freqs_sin = _reshape_for_broadcast(freqs_sin, r)
+    return out.type_as(q), freqs_cos, freqs_sin
 
-        xq_out_r = r * freqs_cos - i * freqs_sin
-        xq_out_i = r * freqs_sin + i * freqs_cos
 
-        xq_out = torch.stack([xq_out_r, xq_out_i], dim=-1).flatten(3)
+def _apply_rotary_key_emb(k, freqs_cos, freqs_sin):
+    r, i = k.float().reshape(k.shape[:-1] + (-1, 2)).unbind(-1)
+    out_r = r * freqs_cos - i * freqs_sin
+    out_i = r * freqs_sin + i * freqs_cos
+    out = torch.stack([out_r, out_i], dim=-1).flatten(3)
 
-        return xq_out.type_as(q)
+    return out.type_as(key)
 
 
 def _panda_split_to_words(text):
