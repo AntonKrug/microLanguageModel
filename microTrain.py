@@ -64,6 +64,7 @@ class RootMeanSquareNormalization(torch.nn.Module):
         out = x.float() * torch.rsqrt(x.float().pow(2).mean(-1, keepdim=True) + normalization_epsilon)
         return out.type_as(x) * self.weight
 
+
 class SwiGlu(nn.Module):
     def __init__(self):
         super().__init__()
@@ -73,6 +74,15 @@ class SwiGlu(nn.Module):
 
     def forward(self, x):
         return self.back(functional.silu(self.w(x)) * self.v(x))
+
+
+def _calculate_freqs_cis():
+    freqs = 1.0 / (10000.0 ** (torch.arange(0, dimensions_per_head, 2)[: (dimensions_per_head // 2)].float() / dimensions_per_head))
+    t = torch.arange(token_limit)
+    freqs = torch.outer(t, freqs).float()
+    freqs_cos = torch.cos(freqs)
+    freqs_sin = torch.sin(freqs)
+    return freqs_cos, freqs_sin
 
 
 def _reshape_for_broadcast(freqs_cis, x):
