@@ -13,6 +13,7 @@ from sentencepiece import SentencePieceProcessor
 import torch
 from torch import nn
 from torch.nn import functional
+from torchviz import make_dot
 
 # model params
 vocabulary_size = 3169
@@ -48,6 +49,7 @@ plain_text_data_file_name = os.path.join("data-work", "plain_text_sentences.txt"
 vocabulary_file_name =  os.path.join("data-work", "vocabulary")
 vocabulary_file_model_name = vocabulary_file_name + ".model"
 token_data_file_name = os.path.join("data-work", "sentences.tokens")
+model_visualization_dot_name = os.path.join("data-work", "model-visualization-dot")
 
 # global variables
 word_counts_total = Counter()
@@ -73,63 +75,102 @@ class SwiGlu(nn.Module):
         self.back = nn.Linear(hidden_feed_forward_network_dimensions, vocabulary_dimensions, bias=False)
 
     def forward(self, x):
+        # https://docs.pytorch.org/docs/stable/generated/torch.nn.SiLU.html
         return self.back(functional.silu(self.w(x)) * self.v(x))
 
+class Model(object):
 
-def _calculate_freqs_cis():
-    freqs = 1.0 / (10000.0 ** (torch.arange(0, dimensions_per_head, 2)[: (dimensions_per_head // 2)].float() / dimensions_per_head))
-    t = torch.arange(token_limit)
-    freqs = torch.outer(t, freqs).float()
-    freqs_cos = torch.cos(freqs)
-    freqs_sin = torch.sin(freqs)
-    return freqs_cos, freqs_sin
+    # TODO: Make it not static and take the debug state from the instance
+    @staticmethod
+    def calculate_pre_populated_theta_outer_cosinus_sinus(debug=False):
+        # https://www.youtube.com/watch?v=GQPOtyITy54
+        # example each token has 128 dimensions, with 4 heads, it's 32 dimensions per head
+
+        # when dimensions_per_head==32 (0,2,4...30) and when dimensions_per_head==33 (0,2,4...30,32)
+        even_dimensions = torch.arange(0, dimensions_per_head, 2)
+
+        # when dimensions_per_head even then no change.
+        # when dimensions_per_head odd then truncate last dimension: dimensions_per_head==33 (0,2,4...30)
+        # so we get even amount (aligned for cos and sin) of even values
+        aligned_dimensions = even_dimensions[: (dimensions_per_head // 2)]
+
+        # rescaled from 0 to almost 1.0 (non-inclusive)
+        normalized = aligned_dimensions.float() / dimensions_per_head
+
+        # example 10000.0^0.5=100 and 1.0 / 100 => 0.01
+        theta = 1.0 / (10000.0 ** normalized)
+
+        tokens_range = torch.arange(token_limit)
+
+        # https://docs.pytorch.org/docs/stable/generated/torch.outer.html
+        # https://en.wikipedia.org/wiki/Outer_product
+        theta_outer = torch.outer(tokens_range, theta).float()
+
+        # https://docs.pytorch.org/docs/stable/generated/torch.cos.html
+        theta_outer_cos = torch.cos(theta_outer)
+        theta_outer_sin = torch.sin(theta_outer)
+
+        if debug:
+            print(f"vocabulary dimensions {vocabulary_dimensions} spread to {attention_heads} attention heads => {dimensions_per_head} dimensions per head")
+            print(even_dimensions)
+            print(aligned_dimensions)
+            print(normalized)
+            print(theta)
+            print(theta_outer)
+            print(theta_outer_cos)
+            print(theta_outer_sin)
+
+        return theta_outer_cos, theta_outer_sin
 
 
-def _reshape_for_broadcast(freqs_cis, x):
-    ndim = x.ndim
-    assert 0 <= 1 < ndim
-    assert freqs_cis.shape == (x.shape[1], x.shape[-1])
-    shape = [d if i == 1 or i == ndim - 1 else 1 for i, d in enumerate(x.shape)]
-    return freqs_cis.view(shape)
+    @staticmethod
+    def reshape_for_broadcast(freqs_cis, x):
+        ndim = x.ndim
+        assert 0 <= 1 < ndim
+        assert freqs_cis.shape == (x.shape[1], x.shape[-1])
+        shape = [d if i == 1 or i == ndim - 1 else 1 for i, d in enumerate(x.shape)]
+        return freqs_cis.view(shape)
 
 
-def _apply_rotary_position_embedding_query(query, freqs_cos, freqs_sin):
-    # https://pub.towardsai.net/llama-architecture-a-deep-dive-into-efficiency-and-mathematics-9c95c0e4bf8b
-    # https://pypi.org/project/rotary-embedding-tensorflow/
-    real, imaginary = query.float().reshape(query.shape[:-1] + (-1, 2)).unbind(-1)
+    @staticmethod
+    def apply_rotary_position_embedding_query(query, freqs_cos, freqs_sin):
+        # https://pub.towardsai.net/llama-architecture-a-deep-dive-into-efficiency-and-mathematics-9c95c0e4bf8b
+        # https://pypi.org/project/rotary-embedding-tensorflow/
+        real, imaginary = query.float().reshape(query.shape[:-1] + (-1, 2)).unbind(-1)
 
-    freqs_cos = _reshape_for_broadcast(freqs_cos, real)
-    freqs_sin = _reshape_for_broadcast(freqs_sin, real)
+        freqs_cos = Model.reshape_for_broadcast(freqs_cos, real)
+        freqs_sin = Model.reshape_for_broadcast(freqs_sin, real)
 
-    out_real      = real * freqs_cos - imaginary * freqs_sin
-    out_imaginary = real * freqs_sin + imaginary * freqs_cos
+        out_real      = real * freqs_cos - imaginary * freqs_sin
+        out_imaginary = real * freqs_sin + imaginary * freqs_cos
 
-    out = torch.stack([out_real, out_imaginary], dim=-1).flatten(3)
+        out = torch.stack([out_real, out_imaginary], dim=-1).flatten(3)
 
-    return out.type_as(query), freqs_cos, freqs_sin
+        return out.type_as(query), freqs_cos, freqs_sin
+
+    @staticmethod
+    def apply_rotary_position_embedding_key(key, freqs_cos, freqs_sin):
+        real, imaginary = key.float().reshape(key.shape[:-1] + (-1, 2)).unbind(-1)
+
+        out_real      = real * freqs_cos - imaginary * freqs_sin
+        out_imaginary = real * freqs_sin + imaginary * freqs_cos
+
+        out = torch.stack([out_real, out_imaginary], dim=-1).flatten(3)
+
+        return out.type_as(key)
 
 
-def _apply_rotary_position_embedding_key(key, freqs_cos, freqs_sin):
-    real, imaginary = key.float().reshape(key.shape[:-1] + (-1, 2)).unbind(-1)
+    @staticmethod
+    def reshape_key_value(x, scale_ratio) -> torch.Tensor:
+        if scale_ratio == 1:
+            # will not need to change shape, just return as is
+            return x
 
-    out_real      = real * freqs_cos - imaginary * freqs_sin
-    out_imaginary = real * freqs_sin + imaginary * freqs_cos
-
-    out = torch.stack([out_real, out_imaginary], dim=-1).flatten(3)
-
-    return out.type_as(key)
-
-
-def _reshape_key_value(x, scale_ratio) -> torch.Tensor:
-    if scale_ratio == 1:
-        # will not need to change shape, just return as is
-        return x
-
-    return (
-        x[:, :, :, None, :]
-        .expand(batch_size, token_limit, key_value_heads, scale_ratio, dimensions_per_head)
-        .reshape(batch_size, token_limit, key_value_heads * scale_ratio, dimensions_per_head)
-    )
+        return (
+            x[:, :, :, None, :]
+            .expand(batch_size, token_limit, key_value_heads, scale_ratio, dimensions_per_head)
+            .reshape(batch_size, token_limit, key_value_heads * scale_ratio, dimensions_per_head)
+        )
 
 
 def _panda_split_to_words(text):
@@ -481,10 +522,28 @@ def to_tokens():
     with open(token_data_file_name, "wb") as f:
         f.write(final_tokens.tobytes())
 
-def train():
+def train(debug=False):
 
     torch.set_default_dtype(torch.bfloat16)
     torch.set_default_device("cuda" if torch.cuda.is_available() else "cpu")
+
+    # https://docs.pytorch.org/docs/stable/generated/torch.set_printoptions.html
+    torch.set_printoptions(threshold=40000, sci_mode=False, precision=8, linewidth=120)
+
+    Model.calculate_pre_populated_theta_outer_cosinus_sinus(debug)
+
+    model = nn.Sequential()
+    model.add_module('W0', nn.Linear(8, 16))
+    model.add_module('tanh', nn.Tanh())
+    model.add_module('W1', nn.Linear(16, 1))
+
+    x = torch.randn(1, 8)
+    y = model(x)
+
+    if debug:
+        make_dot(y.mean(), params=dict(model.named_parameters()), show_attrs=True, show_saved=True).render(model_visualization_dot_name, format="png")
+        onnx_export = torch.onnx.export(model, x, dynamo=True)
+        onnx_export.save("model.onnx")
 
 
 if __name__ == "__main__":
@@ -501,7 +560,8 @@ if __name__ == "__main__":
     elif args.function == "to_tokens":
         to_tokens()
     elif args.function == "train":
-        train()
+        #todo: debug as parameter
+        train(debug=True)
     else:
         raise ValueError(f"Unknown argument {args.function}")
 
