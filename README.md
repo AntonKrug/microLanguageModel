@@ -28,3 +28,5 @@ Including the versions which worked for me quick justification/explanations why:
   - And to use the protoc `protoc --python_out=. sentencepiece_model.proto`
 - If wanting to experiment get the Jupyter notebook as well: `pip install jupyterlab`
   - To ran on my NAS and have remote access `jupyter notebook --no-browser --ip 0.0.0.0 --port=8888`
+- Graphviz for rendering visualizations https://graphviz.org/download/
+- Onnxscript `pip install onnx onnxscript` to export data for Netron visualizer
