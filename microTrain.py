@@ -205,7 +205,7 @@ def _load_dataframe():
     return df
 
 
-def _word_count(df):
+def _word_count(df, debug):
     _header("Counting words")
 
     print('Splitting texts to words')
@@ -218,10 +218,11 @@ def _word_count(df):
     for count_in_one_text in df['words']:
         word_counts_total.update(count_in_one_text)
 
-    i = 1
-    for word in sorted(word_counts_total, key=word_counts_total.get, reverse=True):
-        print(i, word, ' => ', word_counts_total[word])
-        i=i+1
+    if debug:
+        i=1
+        for word in sorted(word_counts_total, key=word_counts_total.get, reverse=True):
+            print(i, word, ' => ', word_counts_total[word])
+            i=i+1
 
     print('Words used in texts', len(word_counts_total))
     if vocabulary_size == len(word_counts_total):
@@ -230,18 +231,19 @@ def _word_count(df):
         print('Warning: Not matching the hard-coded vocabulary size', vocabulary_size)
 
 
-def _first_word_of_text(df):
+def _first_word_of_text(df, debug):
     _header('Counting first word of each text')
     df['first'] = df['text'].apply(_panda_first_word)
 
     for first in df['first']:
         first_word_total.update([first])
 
-    for word in sorted(first_word_total, key=first_word_total.get, reverse=True):
-        print(word, ' => ', first_word_total[word])
+    if debug:
+        for word in sorted(first_word_total, key=first_word_total.get, reverse=True):
+            print(word, ' => ', first_word_total[word])
 
 
-def _letter_usage_statistics():
+def _letter_usage_statistics(debug):
     _header('Counting letter usage of all words')
     for word in word_counts_total:
         # there is ~12 bytes of savings in huffman tables if i would use single
@@ -269,7 +271,9 @@ def _letter_usage_statistics():
     total_char_used_for_vocabulary = 0
     for letter in sorted(letter_counts_total, key=letter_counts_total.get, reverse=True):
         total_char_used_for_vocabulary += letter_counts_total[letter]
-        print(letter, ' => ', letter_counts_total[letter])
+        if debug:
+            print(letter, ' => ', letter_counts_total[letter])
+
     print(f"Total amount of characters used to store whole vocabulary: {total_char_used_for_vocabulary}")
     return total_char_used_for_vocabulary
 
@@ -304,15 +308,16 @@ def _build_huffman_table(counter):
     assign_codes(root)
     return table
 
-def _huffman_stream_as_padded_cpp(prefix, stream_payload, codeword_max_len_of_bits, character_ord_min):
+def _huffman_stream_as_padded_cpp(debug, prefix, stream_payload, codeword_max_len_of_bits, character_ord_min):
     pad_len = (8 - len(stream_payload) % 8) %8  # %8 handles exact multiples of bytes
     print(f"Stream needs to be padded with {pad_len} zeros for byte aligned")
     stream_payload = stream_payload + "0" * pad_len
 
-    print(f"Final combined streamed payload in bits {stream_payload}")
-
     hex_str = hex(int(stream_payload, 2))[2:]  # remove '0x' prefix
-    print(f"As one whole hex string {hex_str}")
+
+    if debug:
+        print(f"Final combined streamed payload in bits {stream_payload}")
+        print(f"As one whole hex string {hex_str}")
 
     hex_chunks = []
     for i in range(0, len(stream_payload), 8):
@@ -320,25 +325,27 @@ def _huffman_stream_as_padded_cpp(prefix, stream_payload, codeword_max_len_of_bi
         hex_chunk = hex(int(chunk, 2))[2:].zfill(2)  # 2 hex digits = 8 bits
         hex_chunks.append(hex_chunk)
 
-    print(f"As {len(hex_chunks)} 8-bit hex chunks:")
+    if debug:
+        print(f"As {len(hex_chunks)} 8-bit hex chunks:")
 
-    print(f"static constexpr std::uint8_t {prefix}_max_codeword_bits_length_bits = {codeword_max_len_of_bits.bit_length()};"
-          f"// codewords have different sizes (of bits), figure out how many bits needed to store the biggest one")
-    print(f"static constexpr std::uint8_t {prefix}_vocabulary_huffman_character_offset = {character_ord_min};")
-    print(f"static constexpr std::array<std::uint8_t,{len(hex_chunks)}> {prefix}_vocabulary_huffman_stream{{", end="")
-    comma = ''
-    for chunk in hex_chunks:
-        print(f"{comma}0x{chunk}", end="")
-        comma = ', '
-    print("};")
+        print(f"static constexpr std::uint8_t {prefix}_max_codeword_bits_length_bits = {codeword_max_len_of_bits.bit_length()};"
+              f"// codewords have different sizes (of bits), figure out how many bits needed to store the biggest one")
+        print(f"static constexpr std::uint8_t {prefix}_vocabulary_huffman_character_offset = {character_ord_min};")
+        print(f"static constexpr std::array<std::uint8_t,{len(hex_chunks)}> {prefix}_vocabulary_huffman_stream{{", end="")
+        comma = ''
+        for chunk in hex_chunks:
+            print(f"{comma}0x{chunk}", end="")
+            comma = ', '
+        print("};")
+
     return len(hex_chunks)
 
 
-def words_counts_and_stats():
+def words_counts_and_stats(debug=False):
     df = _load_dataframe()
-    _word_count(df)
-    _first_word_of_text(df)
-    total_char_used_for_vocabulary = _letter_usage_statistics()
+    _word_count(df, debug)
+    _first_word_of_text(df, debug)
+    total_char_used_for_vocabulary = _letter_usage_statistics(debug)
 
     _header('Huffman table creation')
     huffman_table = _build_huffman_table(letter_counts_total)
@@ -361,12 +368,15 @@ def words_counts_and_stats():
 
         codeword_lengths_count.update([str(len(code))])
         codeword_lengths_sum += len(code)
-        print(f"{ch!r} (ord {ord(ch):>3}): {code:>14}, length {len(code):>2} x frequency {letter_counts_total[ch]:>4} = {bits_used:>5} bits used in "
-              f"total whole vocabulary to address this codeword")
+        if debug:
+            print(f"{ch!r} (ord {ord(ch):>3}): {code:>14}, length {len(code):>2} x frequency {letter_counts_total[ch]:>4} = {bits_used:>5} bits used in "
+                  f"total whole vocabulary to address this codeword")
 
         total_huffman_table_codeword_bits_used += bits_used
 
-    print(f"Codeword length statistics", codeword_lengths_count)
+    if debug:
+        print(f"Codeword length statistics", codeword_lengths_count)
+
     codeword_lengths_max = int(max(codeword_lengths_count, key=codeword_lengths_count.get))-1 # we can offset by -1 as that is the minimum we would move anyway
     print(f"Largest codeword length {codeword_lengths_max} (but needs to be offset by +1) ({codeword_lengths_max.bit_length()} bits to store this number)")
 
@@ -403,11 +413,12 @@ def words_counts_and_stats():
     print(f"Streamed huffman table saves further {huffman_table_bytes_aligned - huffman_table_bytes_streamed} "
            f"bytes ignoring the firmware differences to support this")
 
-
-    _header('Huffman (aligned) table ordered for the firmware')
     sorted_huffman_table = sorted(huffman_table.items(), key=lambda x: (len(x[1])))
-    for ch, code in sorted_huffman_table:
-        print(f"{{ .code=0'b{code.ljust(16, '0')}, .bits={str(len(code)).zfill(2)} .character='{ch}' }}, // {code}")
+
+    if debug:
+        _header('Huffman (aligned) table ordered for the firmware')
+        for ch, code in sorted_huffman_table:
+            print(f"{{ .code=0'b{code.ljust(16, '0')}, .bits={str(len(code)).zfill(2)} .character='{ch}' }}, // {code}")
 
     _header('Huffman (streamed) payload ')
     stream_payload = ''
@@ -418,15 +429,16 @@ def words_counts_and_stats():
         if max_entry_len < len(current_entry):
             max_entry_len = len(current_entry)
 
-        print(f"Entry for {ch} = {current_entry:<24} (len={len(code):0{codeword_max_len_of_bits.bit_length()}b} "
-              f"code={code:<{codeword_max_len_of_bits}} "
-              f"char_delta={(ord(ch)-character_ord_min):0{delta_characters_ord.bit_length()}b} + "
-              f"char_offset={character_ord_min})")
+        if debug:
+            print(f"Entry for {ch} = {current_entry:<24} (len={len(code):0{codeword_max_len_of_bits.bit_length()}b} "
+                  f"code={code:<{codeword_max_len_of_bits}} "
+                  f"char_delta={(ord(ch)-character_ord_min):0{delta_characters_ord.bit_length()}b} + "
+                  f"char_offset={character_ord_min})")
 
         stream_payload += current_entry
 
     print(f"Max entry length = {max_entry_len} (firmware needs to hold at least this amount of bits)");
-    hex_chunks_len = _huffman_stream_as_padded_cpp("stream", stream_payload, codeword_max_len_of_bits, character_ord_min)
+    hex_chunks_len = _huffman_stream_as_padded_cpp(debug,"stream", stream_payload, codeword_max_len_of_bits, character_ord_min)
 
     _header('Huffman (streamed-packed) payload ')
     stream_payload = ''
@@ -435,16 +447,19 @@ def words_counts_and_stats():
         if length != len(code):
             changing_size_payload = (f"{len(code):0{codeword_max_len_of_bits.bit_length()}b}"
                                      f"{int(codeword_lengths_count[str(len(code))])-1:0{codeword_lengths_max.bit_length()}b}")
-            print(f"Size change payload:{changing_size_payload} len:{len(code)} repeated(-1):{codeword_lengths_count[str(len(code))]-1}")
+            if debug:
+                print(f"Size change payload:{changing_size_payload} len:{len(code)} repeated(-1):{codeword_lengths_count[str(len(code))]-1}")
+
             stream_payload += changing_size_payload
             length = len(code)
 
         current_entry = f"{code}{(ord(ch)-character_ord_min):0{delta_characters_ord.bit_length()}b}"
 
-        print(f"Entry for {ch} = {current_entry:<20} ("
-              f"code={code:<{codeword_max_len_of_bits}} "
-              f"char_delta={(ord(ch)-character_ord_min):0{delta_characters_ord.bit_length()}b} + "
-              f"char_offset={character_ord_min})")
+        if debug:
+            print(f"Entry for {ch} = {current_entry:<20} ("
+                  f"code={code:<{codeword_max_len_of_bits}} "
+                  f"char_delta={(ord(ch)-character_ord_min):0{delta_characters_ord.bit_length()}b} + "
+                  f"char_offset={character_ord_min})")
 
         stream_payload += current_entry
 
@@ -454,9 +469,10 @@ def words_counts_and_stats():
     print(f"Stream needs to be padded with {pad_len} zeros for byte aligned")
     stream_payload = stream_payload + "0" * pad_len
     print(f"Stream size in {int(len(stream_payload)/8)} bytes")
-    print(f"Final combined stream payload in bits {stream_payload}")
+    if debug:
+        print(f"Final combined stream payload in bits {stream_payload}")
 
-    hex_chunks_len = _huffman_stream_as_padded_cpp("packed_stream", stream_payload, codeword_max_len_of_bits, character_ord_min)
+    hex_chunks_len = _huffman_stream_as_padded_cpp(debug,"packed_stream", stream_payload, codeword_max_len_of_bits, character_ord_min)
 
     return df
 
@@ -557,7 +573,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.function == "words_counts_and_stats":
-        words_counts_and_stats()
+        words_counts_and_stats(debug=False)
     elif args.function == "plain_text":
         plain_text()
     elif args.function == "vocabulary_creation":
