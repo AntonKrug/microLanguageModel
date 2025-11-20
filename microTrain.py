@@ -50,6 +50,7 @@ vocabulary_file_name =  os.path.join("data-work", "vocabulary")
 vocabulary_file_model_name = vocabulary_file_name + ".model"
 token_data_file_name = os.path.join("data-work", "sentences.tokens")
 model_visualization_dot_name = os.path.join("data-work", "model-visualization-dot")
+model_visualization_onnx_name = os.path.join("data-work", "model-visualization-onnx")
 
 # global variables
 word_counts_total = Counter()
@@ -543,7 +544,7 @@ def train(debug=False):
     if debug:
         make_dot(y.mean(), params=dict(model.named_parameters()), show_attrs=True, show_saved=True).render(model_visualization_dot_name, format="png")
         onnx_export = torch.onnx.export(model, x, dynamo=True)
-        onnx_export.save("model.onnx")
+        onnx_export.save(model_visualization_onnx_name)
 
 
 if __name__ == "__main__":
