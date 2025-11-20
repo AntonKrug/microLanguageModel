@@ -1,19 +1,16 @@
 import argparse
 import heapq
-from collections import OrderedDict, Counter
-from itertools import count
+import collections
+import itertools
 import json
 import numpy
 import os
-import re
+#import re
 
 import pandas
 import sentencepiece
-from sentencepiece import SentencePieceProcessor
 import torch
-from torch import nn
-from torch.nn import functional
-from torchviz import make_dot
+import torchviz
 
 # model params
 vocabulary_size = 3169
@@ -53,37 +50,39 @@ model_visualization_dot_name = os.path.join("data-work", "model-visualization-do
 model_visualization_onnx_name = os.path.join("data-work", "model-visualization-onnx")
 
 # global variables
-word_counts_total = Counter()
-first_word_total = Counter()
-letter_counts_total = Counter()
+word_counts_total = collections.Counter()
+first_word_total = collections.Counter()
+letter_counts_total = collections.Counter()
 
 
 class RootMeanSquareNormalization(torch.nn.Module):
     def __init__(self):
         super().__init__()
-        self.weight = nn.Parameter(torch.ones(vocabulary_dimensions))
+        self.weight = torch.nn.Parameter(torch.ones(vocabulary_dimensions))
 
     def forward(self, x):
         out = x.float() * torch.rsqrt(x.float().pow(2).mean(-1, keepdim=True) + normalization_epsilon)
         return out.type_as(x) * self.weight
 
 
-class SwiGlu(nn.Module):
+class SwiGlu(torch.nn.Module):
     def __init__(self):
         super().__init__()
-        self.w    = nn.Linear(vocabulary_dimensions, hidden_feed_forward_network_dimensions, bias=False)
-        self.v    = nn.Linear(vocabulary_dimensions, hidden_feed_forward_network_dimensions, bias=False)
-        self.back = nn.Linear(hidden_feed_forward_network_dimensions, vocabulary_dimensions, bias=False)
+        self.w    = torch.nn.Linear(vocabulary_dimensions, hidden_feed_forward_network_dimensions, bias=False)
+        self.v    = torch.nn.Linear(vocabulary_dimensions, hidden_feed_forward_network_dimensions, bias=False)
+        self.back = torch.nn.Linear(hidden_feed_forward_network_dimensions, vocabulary_dimensions, bias=False)
 
     def forward(self, x):
         # https://docs.pytorch.org/docs/stable/generated/torch.nn.SiLU.html
-        return self.back(functional.silu(self.w(x)) * self.v(x))
+        return self.back(torch.nn.functional.silu(self.w(x)) * self.v(x))
 
-class Model(object):
+class RotaryPositionEmbedding(torch.nn.Module):
+    def __init__(self, debug=False):
+        super().__init__()
+        self.calculate_pre_populated_theta_outer_cosinus_sinus(debug)
 
-    # TODO: Make it not static and take the debug state from the instance
-    @staticmethod
-    def calculate_pre_populated_theta_outer_cosinus_sinus(debug=False):
+
+    def calculate_pre_populated_theta_outer_cosinus_sinus(self, debug=False):
         # https://www.youtube.com/watch?v=GQPOtyITy54
         # example each token has 128 dimensions, with 4 heads, it's 32 dimensions per head
 
@@ -96,10 +95,13 @@ class Model(object):
         aligned_dimensions = even_dimensions[: (dimensions_per_head // 2)]
 
         # rescaled from 0 to almost 1.0 (non-inclusive)
-        normalized = aligned_dimensions.float() / dimensions_per_head
+        power_normalized = aligned_dimensions.float() / dimensions_per_head
+
+        # base on which the inverse power will be calculated (the theta)
+        base=10000.0
 
         # example 10000.0^0.5=100 and 1.0 / 100 => 0.01
-        theta = 1.0 / (10000.0 ** normalized)
+        theta = 1.0 / (base ** power_normalized)
 
         tokens_range = torch.arange(token_limit)
 
@@ -115,14 +117,16 @@ class Model(object):
             print(f"vocabulary dimensions {vocabulary_dimensions} spread to {attention_heads} attention heads => {dimensions_per_head} dimensions per head")
             print(even_dimensions)
             print(aligned_dimensions)
-            print(normalized)
+            print(power_normalized)
             print(theta)
             print(theta_outer)
             print(theta_outer_cos)
             print(theta_outer_sin)
 
-        return theta_outer_cos, theta_outer_sin
+        self.register_buffer("theta_outer_cos", theta_outer_cos, persistent=False)
+        self.register_buffer("theta_outer_sin", theta_outer_sin, persistent=False)
 
+class Model(object):
 
     @staticmethod
     def reshape_for_broadcast(freqs_cis, x):
@@ -177,7 +181,7 @@ class Model(object):
 def _panda_split_to_words(text):
     # text = re.sub(r"[^\w\s']", '', text)  # remove punctuation
     words = text.split()
-    return Counter(words)
+    return collections.Counter(words)
 
 
 def _panda_first_word(text):
@@ -208,7 +212,7 @@ def _word_count(df):
     df['words'] = df['text'].apply(_panda_split_to_words)
 
     print('Counting words in each text')
-    df['word_counts'] = df['words'].apply(Counter)
+    df['word_counts'] = df['words'].apply(collections.Counter)
 
     print('Adding up words for all texts')
     for count_in_one_text in df['words']:
@@ -272,7 +276,7 @@ def _letter_usage_statistics():
 
 def _build_huffman_table(counter):
     heap = []
-    _count = count()
+    _count = itertools.count()
 
     # leaf nodes
     for ch, freq in counter.items():
@@ -342,7 +346,7 @@ def words_counts_and_stats():
     codeword_max_len_of_bits = 0
     character_ord_min = 255
     character_ord_max = 0
-    codeword_lengths_count = Counter()
+    codeword_lengths_count = collections.Counter()
     codeword_lengths_sum = 0
     for ch, code in huffman_table.items():
         bits_used = len(code) * letter_counts_total[ch]
@@ -505,7 +509,7 @@ def vocabulary_creation():
 
 def to_tokens():
     _header("Loading vocabulary tokenizer model")
-    sentencepiece_model = SentencePieceProcessor(model_file = vocabulary_file_model_name)
+    sentencepiece_model = sentencepiece.SentencePieceProcessor(model_file = vocabulary_file_model_name)
 
     _header('Loading input json file to parse json into tokens', input_data_json_file_name)
     input_json_file = open(input_data_json_file_name, 'r')
@@ -531,18 +535,18 @@ def train(debug=False):
     # https://docs.pytorch.org/docs/stable/generated/torch.set_printoptions.html
     torch.set_printoptions(threshold=40000, sci_mode=False, precision=8, linewidth=120)
 
-    Model.calculate_pre_populated_theta_outer_cosinus_sinus(debug)
+    rope = RotaryPositionEmbedding(debug)
 
-    model = nn.Sequential()
-    model.add_module('W0', nn.Linear(8, 16))
-    model.add_module('tanh', nn.Tanh())
-    model.add_module('W1', nn.Linear(16, 1))
+    model = torch.nn.Sequential()
+    model.add_module('W0', torch.nn.Linear(8, 16))
+    model.add_module('tanh', torch.nn.Tanh())
+    model.add_module('W1', torch.nn.Linear(16, 1))
 
     x = torch.randn(1, 8)
     y = model(x)
 
     if debug:
-        make_dot(y.mean(), params=dict(model.named_parameters()), show_attrs=True, show_saved=True).render(model_visualization_dot_name, format="png")
+        torchviz.make_dot(y.mean(), params=dict(model.named_parameters()), show_attrs=True, show_saved=True).render(model_visualization_dot_name, format="png")
         onnx_export = torch.onnx.export(model, x, dynamo=True)
         onnx_export.save(model_visualization_onnx_name)
 
