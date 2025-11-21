@@ -98,10 +98,11 @@ class RotaryPositionEmbedding(torch.nn.Module):
         power_normalized = aligned_dimensions.float() / dimensions_per_head
 
         # base on which the inverse power will be calculated (the theta)
-        base=10000.0
+        # https://www.frontiersin.org/journals/computer-science/articles/10.3389/fcomp.2025.1626899/full
+        baseline=10000.0
 
         # example 10000.0^0.5=100 and 1.0 / 100 => 0.01
-        theta = 1.0 / (base ** power_normalized)
+        theta = 1.0 / (baseline ** power_normalized)
 
         tokens_range = torch.arange(token_limit)
 
