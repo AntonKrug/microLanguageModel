@@ -127,49 +127,44 @@ class RotaryPositionEmbedding(torch.nn.Module):
         self.register_buffer("theta_outer_cos", theta_outer_cos, persistent=False)
         self.register_buffer("theta_outer_sin", theta_outer_sin, persistent=False)
 
-class Model(object):
-
-    @staticmethod
-    def reshape_for_broadcast(freqs_cis, x):
+    def reshape_for_broadcast(cosine_or_sine, x):
         ndim = x.ndim
         assert 0 <= 1 < ndim
-        assert freqs_cis.shape == (x.shape[1], x.shape[-1])
+        assert cosine_or_sine.shape == (x.shape[1], x.shape[-1])
         shape = [d if i == 1 or i == ndim - 1 else 1 for i, d in enumerate(x.shape)]
-        return freqs_cis.view(shape)
+        return cosine_or_sine.view(shape)
 
-
-    @staticmethod
-    def apply_rotary_position_embedding_query(query, freqs_cos, freqs_sin):
+    def apply_on_embedding_query_and_key(self, query, key):
         # https://pub.towardsai.net/llama-architecture-a-deep-dive-into-efficiency-and-mathematics-9c95c0e4bf8b
         # https://pypi.org/project/rotary-embedding-tensorflow/
-        real, imaginary = query.float().reshape(query.shape[:-1] + (-1, 2)).unbind(-1)
+        # Query
+        query_real, query_imaginary = query.float().reshape(query.shape[:-1] + (-1, 2)).unbind(-1)
 
-        freqs_cos = Model.reshape_for_broadcast(freqs_cos, real)
-        freqs_sin = Model.reshape_for_broadcast(freqs_sin, real)
+        rotation_cos = self.reshape_for_broadcast(self.theta_outer_cos, query_real)
+        rotation_sin = self.reshape_for_broadcast(self.theta_outer_sin, query_real)
 
-        out_real      = real * freqs_cos - imaginary * freqs_sin
-        out_imaginary = real * freqs_sin + imaginary * freqs_cos
+        query_out_real      = query_real * rotation_cos - query_imaginary * rotation_sin
+        query_out_imaginary = query_real * rotation_sin + query_imaginary * rotation_cos
 
-        out = torch.stack([out_real, out_imaginary], dim=-1).flatten(3)
+        query_out = torch.stack([query_out_real, query_out_imaginary], dim=-1).flatten(3)
 
-        return out.type_as(query), freqs_cos, freqs_sin
+        # Key
+        key_real, key_imaginary = key.float().reshape(key.shape[:-1] + (-1, 2)).unbind(-1)
 
-    @staticmethod
-    def apply_rotary_position_embedding_key(key, freqs_cos, freqs_sin):
-        real, imaginary = key.float().reshape(key.shape[:-1] + (-1, 2)).unbind(-1)
+        key_out_real      = key_real * rotation_cos - key_imaginary * rotation_sin
+        key_out_imaginary = key_real * rotation_sin + key_imaginary * rotation_cos
 
-        out_real      = real * freqs_cos - imaginary * freqs_sin
-        out_imaginary = real * freqs_sin + imaginary * freqs_cos
+        key_out = torch.stack([key_out_real, key_out_imaginary], dim=-1).flatten(3)
 
-        out = torch.stack([out_real, out_imaginary], dim=-1).flatten(3)
+        return query_out.type_as(query), key_out.type_as(key)
 
-        return out.type_as(key)
 
+class Model(object):
 
     @staticmethod
     def reshape_key_value(x, scale_ratio) -> torch.Tensor:
         if scale_ratio == 1:
-            # will not need to change shape, just return as is
+            # will not need to change shape when value heads == key/value heads, just return as is
             return x
 
         return (
@@ -553,6 +548,7 @@ def train(debug=False):
     torch.set_printoptions(threshold=40000, sci_mode=False, precision=8, linewidth=120)
 
     rope = RotaryPositionEmbedding(debug)
+    print(rope.state_dict())
 
     model = torch.nn.Sequential()
     model.add_module('W0', torch.nn.Linear(8, 16))
