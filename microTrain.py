@@ -80,7 +80,7 @@ class RotaryPositionEmbedding(torch.nn.Module):
     def __init__(self, debug=False):
         super().__init__()
         self.calculate_pre_populated_theta_outer_cosinus_sinus(debug)
-
+        print(self.theta_outer_cos.shape)
 
     def calculate_pre_populated_theta_outer_cosinus_sinus(self, debug=False):
         # https://www.youtube.com/watch?v=GQPOtyITy54
