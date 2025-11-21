@@ -137,7 +137,7 @@ class RotaryPositionEmbedding(torch.nn.Module):
     def apply_on_embedding_query_and_key(self, query, key):
         # https://pub.towardsai.net/llama-architecture-a-deep-dive-into-efficiency-and-mathematics-9c95c0e4bf8b
         # https://pypi.org/project/rotary-embedding-tensorflow/
-        # Query
+        # Query rotation
         query_real, query_imaginary = query.float().reshape(query.shape[:-1] + (-1, 2)).unbind(-1)
 
         rotation_cos = self.reshape_for_broadcast(self.theta_outer_cos, query_real)
@@ -148,7 +148,7 @@ class RotaryPositionEmbedding(torch.nn.Module):
 
         query_out = torch.stack([query_out_real, query_out_imaginary], dim=-1).flatten(3)
 
-        # Key
+        # Key rotation
         key_real, key_imaginary = key.float().reshape(key.shape[:-1] + (-1, 2)).unbind(-1)
 
         key_out_real      = key_real * rotation_cos - key_imaginary * rotation_sin
