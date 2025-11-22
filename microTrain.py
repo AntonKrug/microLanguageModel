@@ -11,6 +11,7 @@ import pandas
 import sentencepiece
 import torch
 import torchviz
+from sympy.codegen.fnodes import dimension
 
 # model params
 vocabulary_size = 3169
@@ -20,7 +21,8 @@ key_value_heads = 4  # 4 key and value heads
 key_value_to_query_heads_ratio = 2  # end up with 2 queries per 1 key
 
 attention_heads = key_value_heads * key_value_to_query_heads_ratio  # grouped query attention (GQA) - 8 query heads (rotary) for 4 key (rotary) and 4 value
-dimensions_per_head = 8  # how many dimensions from the token each query head will be assigned with
+dimensions_per_head_per_real_or_imaginary = 16 # whe dimensions_per_head will be split between real and imaginary RoPE fragments we want to have them evenly split *2
+dimensions_per_head = dimensions_per_head_per_real_or_imaginary * 2  # how many dimensions from the token each query head will be assigned with (one for real and imaginary)
 vocabulary_dimensions = attention_heads * dimensions_per_head  # size of vector associated with each token
 
 token_limit = 50  # limit of the context token window
@@ -79,10 +81,15 @@ class SwiGlu(torch.nn.Module):
 class RotaryPositionEmbedding(torch.nn.Module):
     def __init__(self, debug=False):
         super().__init__()
-        self.calculate_pre_populated_theta_outer_cosinus_sinus(debug)
+        self.debug = debug
+        self.calculate_pre_populated_theta_outer_cosinus_sinus()
         print(self.theta_outer_cos.shape)
 
-    def calculate_pre_populated_theta_outer_cosinus_sinus(self, debug=False):
+    def forward(self, query, key):
+        return self.apply_on_embedding_query_and_key(query, key)
+
+    def calculate_pre_populated_theta_outer_cosinus_sinus(self, theta_baseline=10000.0):
+        _header("Preparing RoPE theta cos and sin buffer")
         # https://www.youtube.com/watch?v=GQPOtyITy54
         # example each token has 128 dimensions, with 4 heads, it's 32 dimensions per head
 
@@ -92,17 +99,19 @@ class RotaryPositionEmbedding(torch.nn.Module):
         # when dimensions_per_head even then no change.
         # when dimensions_per_head odd then truncate last dimension: dimensions_per_head==33 (0,2,4...30)
         # so we get even amount (aligned for cos and sin) of even values
+        # https://www.reddit.com/r/LocalLLaMA/comments/1c79xxd/anyone_has_ideas_about_the_wired_rope_theta_of/
         aligned_dimensions = even_dimensions[: (dimensions_per_head // 2)]
+
+        assert even_dimensions.shape == aligned_dimensions.shape, "we shouldn't have extra dimension which will get only real, but no imaginary part"
 
         # rescaled from 0 to almost 1.0 (non-inclusive)
         power_normalized = aligned_dimensions.float() / dimensions_per_head
 
         # base on which the inverse power will be calculated (the theta)
         # https://www.frontiersin.org/journals/computer-science/articles/10.3389/fcomp.2025.1626899/full
-        baseline=10000.0
 
         # example 10000.0^0.5=100 and 1.0 / 100 => 0.01
-        theta = 1.0 / (baseline ** power_normalized)
+        theta = 1.0 / (theta_baseline ** power_normalized)
 
         tokens_range = torch.arange(token_limit)
 
@@ -114,7 +123,7 @@ class RotaryPositionEmbedding(torch.nn.Module):
         theta_outer_cos = torch.cos(theta_outer)
         theta_outer_sin = torch.sin(theta_outer)
 
-        if debug:
+        if self.debug:
             print(f"vocabulary dimensions {vocabulary_dimensions} spread to {attention_heads} attention heads => {dimensions_per_head} dimensions per head")
             print(even_dimensions)
             print(aligned_dimensions)
@@ -124,35 +133,78 @@ class RotaryPositionEmbedding(torch.nn.Module):
             print(theta_outer_cos)
             print(theta_outer_sin)
 
+        # https://medium.com/data-scientists-diary/understanding-and-effectively-using-register-buffer-in-pytorch-72e6d1c94a95
         self.register_buffer("theta_outer_cos", theta_outer_cos, persistent=False)
         self.register_buffer("theta_outer_sin", theta_outer_sin, persistent=False)
 
-    def reshape_for_broadcast(cosine_or_sine, x):
-        ndim = x.ndim
-        assert 0 <= 1 < ndim
-        assert cosine_or_sine.shape == (x.shape[1], x.shape[-1])
-        shape = [d if i == 1 or i == ndim - 1 else 1 for i, d in enumerate(x.shape)]
-        return cosine_or_sine.view(shape)
+    def rope_view_for_broadcast(self, cosine_or_sine, x):
+        # https://docs.pytorch.org/docs/stable/notes/broadcasting.html
+        # expand smaller cosine_or_sine tensor to broader input (x) tensor
+        number_of_input_dimensions = x.ndim
+        last_input_dimension_index = number_of_input_dimensions - 1
+        token_limit_dimension_index = 1
+
+        # 0 batch size, 1 token limit, 2 is (accessed by -1 to be safe as the dimension is usually the last anyway)
+        # in this case amount of aligned even dimensions per query head (dimensions divided to query heads, halved and rounded down)
+        assert number_of_input_dimensions >= 2, "input shape must have at least 2 dimensions"
+
+        if self.debug:
+            print(f"Checking if RoPE's c/s {cosine_or_sine.shape} matches input shape @1 (token limit) {x.shape[1]}, @-1 (dimension) {x.shape[-1]}")
+
+        assert cosine_or_sine.shape == (x.shape[1], x.shape[-1]), "the input token_limit and dimension needs to match RoPE's token_limit and dimension"
+        broadcast_shape = []
+        for input_shape_index, input_shape_dimension in enumerate(x.shape):
+            if input_shape_index == token_limit_dimension_index or input_shape_index == last_input_dimension_index:
+                broadcast_shape.append(input_shape_dimension)
+            else:
+                broadcast_shape.append(1)
+                
+        if self.debug:
+            print(f"broadcasted view shape {broadcast_shape} we are going to use")
+
+        return cosine_or_sine.view(broadcast_shape)
+
+    def reshape_query_or_key(self, x):
+        x_float = x.float()
+
+        # get new shape for the last dimension (for example 6 with a,b,c,d,e,f)
+        # make new dimension after it which will be '2' and second last dimension will be inferred '-1'
+        # (for example make 3 pairs with [a,b], [c,d], [e,f])
+        new_shape = x.shape[:-1] + (-1, 2)
+
+        # https://docs.pytorch.org/docs/stable/generated/torch.unbind.html
+        # remove the very last '-1' dimension which was just size of '2' and split it into tuple (example a,c,e and b,d,f)
+        # when we will be processing real and imaginary at the same time, we will be using even
+        # (for real) and odd (for imaginary) from the original input tensor, real having index 0, imaginary index 1 ...
+        real, imaginary = x_float.reshape(new_shape).unbind(-1)
+
+        assert dimensions_per_head_per_real_or_imaginary == real.shape[-1], "model spec should match reality"
+        if self.debug:
+            print(f"input shape {x.shape}. new_shape before reshaping {new_shape}. final real/imaginary shape {real.shape}")
+
+        return real, imaginary
+
 
     def apply_on_embedding_query_and_key(self, query, key):
         # https://pub.towardsai.net/llama-architecture-a-deep-dive-into-efficiency-and-mathematics-9c95c0e4bf8b
         # https://pypi.org/project/rotary-embedding-tensorflow/
         # Query rotation
-        query_real, query_imaginary = query.float().reshape(query.shape[:-1] + (-1, 2)).unbind(-1)
+        query_real, query_imaginary = self.reshape_query_or_key(query)
 
-        rotation_cos = self.reshape_for_broadcast(self.theta_outer_cos, query_real)
-        rotation_sin = self.reshape_for_broadcast(self.theta_outer_sin, query_real)
+        # token_limit and dimensions keep, rest 1s to match better inputs shape
+        rotation_cos_broadcasted = self.rope_view_for_broadcast(self.theta_outer_cos, query_real)
+        rotation_sin_broadcasted = self.rope_view_for_broadcast(self.theta_outer_sin, query_real)
 
-        query_out_real      = query_real * rotation_cos - query_imaginary * rotation_sin
-        query_out_imaginary = query_real * rotation_sin + query_imaginary * rotation_cos
+        query_out_real      = query_real * rotation_cos_broadcasted - query_imaginary * rotation_sin_broadcasted
+        query_out_imaginary = query_real * rotation_sin_broadcasted + query_imaginary * rotation_cos_broadcasted
 
         query_out = torch.stack([query_out_real, query_out_imaginary], dim=-1).flatten(3)
 
         # Key rotation
-        key_real, key_imaginary = key.float().reshape(key.shape[:-1] + (-1, 2)).unbind(-1)
+        key_real, key_imaginary = self.reshape_query_or_key(query)
 
-        key_out_real      = key_real * rotation_cos - key_imaginary * rotation_sin
-        key_out_imaginary = key_real * rotation_sin + key_imaginary * rotation_cos
+        key_out_real      = key_real * rotation_cos_broadcasted - key_imaginary * rotation_sin_broadcasted
+        key_out_imaginary = key_real * rotation_sin_broadcasted + key_imaginary * rotation_cos_broadcasted
 
         key_out = torch.stack([key_out_real, key_out_imaginary], dim=-1).flatten(3)
 
@@ -558,9 +610,14 @@ def train(debug=False):
     x = torch.randn(1, 8)
     y = model(x)
 
+    sanity_q = torch.randn(2, token_limit, attention_heads, dimensions_per_head)
+    sanity_k = torch.randn(2, token_limit, key_value_heads, dimensions_per_head)
+    actual_q, actual_k = rope.forward(sanity_q, sanity_k)
+    print(actual_q.shape, actual_k.shape)
+
     if debug:
         torchviz.make_dot(y.mean(), params=dict(model.named_parameters()), show_attrs=True, show_saved=True).render(model_visualization_dot_name, format="png")
-        onnx_export = torch.onnx.export(model, x, dynamo=True)
+        onnx_export = torch.onnx.export(rope, (sanity_q, sanity_k) , dynamo=True)
         onnx_export.save(model_visualization_onnx_name)
 
 
