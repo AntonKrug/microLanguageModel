@@ -21,7 +21,7 @@ key_value_heads = 4  # 4 key and value heads
 key_value_to_query_heads_ratio = 2  # end up with 2 queries per 1 key
 
 attention_heads = key_value_heads * key_value_to_query_heads_ratio  # grouped query attention (GQA) - 8 query heads (rotary) for 4 key (rotary) and 4 value
-dimensions_per_head_per_real_or_imaginary = 16 # whe dimensions_per_head will be split between real and imaginary RoPE fragments we want to have them evenly split *2
+dimensions_per_head_per_real_or_imaginary = 3 # whe dimensions_per_head will be split between real and imaginary RoPE fragments we want to have them evenly split *2
 dimensions_per_head = dimensions_per_head_per_real_or_imaginary * 2  # how many dimensions from the token each query head will be assigned with (one for real and imaginary)
 vocabulary_dimensions = attention_heads * dimensions_per_head  # size of vector associated with each token
 
@@ -79,39 +79,39 @@ class SwiGlu(torch.nn.Module):
         return self.back(torch.nn.functional.silu(self.w(x)) * self.v(x))
 
 class RotaryPositionEmbedding(torch.nn.Module):
-    def __init__(self, debug=False):
+    def __init__(self, debug=False, theta_baseline=10000.0):
         super().__init__()
         self.debug = debug
+        self.theta_baseline = theta_baseline
         self.calculate_pre_populated_theta_outer_cosinus_sinus()
-        print(self.theta_outer_cos.shape)
 
     def forward(self, query, key):
         return self.apply_on_embedding_query_and_key(query, key)
 
-    def calculate_pre_populated_theta_outer_cosinus_sinus(self, theta_baseline=10000.0):
+    def calculate_pre_populated_theta_outer_cosinus_sinus(self):
         _header("Preparing RoPE theta cos and sin buffer")
         # https://www.youtube.com/watch?v=GQPOtyITy54
         # example each token has 128 dimensions, with 4 heads, it's 32 dimensions per head
 
         # when dimensions_per_head==32 (0,2,4...30) and when dimensions_per_head==33 (0,2,4...30,32)
-        even_dimensions = torch.arange(0, dimensions_per_head, 2)
+        even_dimensions_from_head = torch.arange(0, dimensions_per_head, 2)
 
         # when dimensions_per_head even then no change.
         # when dimensions_per_head odd then truncate last dimension: dimensions_per_head==33 (0,2,4...30)
         # so we get even amount (aligned for cos and sin) of even values
         # https://www.reddit.com/r/LocalLLaMA/comments/1c79xxd/anyone_has_ideas_about_the_wired_rope_theta_of/
-        aligned_dimensions = even_dimensions[: (dimensions_per_head // 2)]
+        aligned_dimensions = even_dimensions_from_head[: (dimensions_per_head // 2)]
 
-        assert even_dimensions.shape == aligned_dimensions.shape, "we shouldn't have extra dimension which will get only real, but no imaginary part"
+        assert even_dimensions_from_head.shape == aligned_dimensions.shape, "we shouldn't have extra dimension which will get only real, but no imaginary part"
 
         # rescaled from 0 to almost 1.0 (non-inclusive)
-        power_normalized = aligned_dimensions.float() / dimensions_per_head
+        by_power_normalized = aligned_dimensions.float() / dimensions_per_head
 
         # base on which the inverse power will be calculated (the theta)
         # https://www.frontiersin.org/journals/computer-science/articles/10.3389/fcomp.2025.1626899/full
 
         # example 10000.0^0.5=100 and 1.0 / 100 => 0.01
-        theta = 1.0 / (theta_baseline ** power_normalized)
+        theta = 1.0 / (self.theta_baseline ** by_power_normalized)
 
         tokens_range = torch.arange(token_limit)
 
@@ -120,18 +120,22 @@ class RotaryPositionEmbedding(torch.nn.Module):
         theta_outer = torch.outer(tokens_range, theta).float()
 
         # https://docs.pytorch.org/docs/stable/generated/torch.cos.html
+        # https://www.geeksforgeeks.org/python/python-pytorch-cos-method/ in radians
         theta_outer_cos = torch.cos(theta_outer)
         theta_outer_sin = torch.sin(theta_outer)
 
         if self.debug:
-            print(f"vocabulary dimensions {vocabulary_dimensions} spread to {attention_heads} attention heads => {dimensions_per_head} dimensions per head")
-            print(even_dimensions)
-            print(aligned_dimensions)
-            print(power_normalized)
-            print(theta)
-            print(theta_outer)
-            print(theta_outer_cos)
-            print(theta_outer_sin)
+            print(f"vocabulary dimensions {vocabulary_dimensions} spread to {attention_heads} attention heads x "
+                  f"{dimensions_per_head} dimensions per head (which is 2 (real&imaginary) * by "
+                  f"{dimensions_per_head_per_real_or_imaginary})")
+
+            print(f"even dimensions from head {even_dimensions_from_head}")
+            print(f"even dimensions normalized to 'by_power' {by_power_normalized}")
+            print(f"theta 1/(baseline ^ by_power) {theta}")
+            print(f"theta outer (theta*token_range) {theta_outer}")
+            print(f"converting theta to cos {theta_outer_cos}")
+            print(f"converting theta to sin {theta_outer_sin}")
+            print(f"theta cos shape {theta_outer_cos.shape}")
 
         # https://medium.com/data-scientists-diary/understanding-and-effectively-using-register-buffer-in-pytorch-72e6d1c94a95
         self.register_buffer("theta_outer_cos", theta_outer_cos, persistent=False)
@@ -599,7 +603,7 @@ def train(debug=False):
     # https://docs.pytorch.org/docs/stable/generated/torch.set_printoptions.html
     torch.set_printoptions(threshold=40000, sci_mode=False, precision=8, linewidth=120)
 
-    rope = RotaryPositionEmbedding(debug)
+    rope = RotaryPositionEmbedding(debug,1000)
     print(rope.state_dict())
 
     model = torch.nn.Sequential()
