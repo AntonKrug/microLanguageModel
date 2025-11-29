@@ -148,12 +148,14 @@ class RotaryPositionEmbedding(torch.nn.Module):
         last_input_dimension_index = number_of_input_dimensions - 1
         token_limit_dimension_index = 1
 
-        # 0 batch size, 1 token limit, 2 is (accessed by -1 to be safe as the dimension is usually the last anyway)
+        # relevant to the rope is token limit dimension, and the last dimension
+
+        # 0 batch size, 1 token limit, 2 is dimensions (accessed by -1 to be safe as the dimension is usually the last anyway)
         # in this case amount of aligned even dimensions per query head (dimensions divided to query heads, halved and rounded down)
         assert number_of_input_dimensions >= 2, "input shape must have at least 2 dimensions"
 
         if self.debug:
-            print(f"Checking if RoPE's c/s {cosine_or_sine.shape} matches input shape @1 (token limit) {x.shape[1]}, @-1 (dimension) {x.shape[-1]}")
+            print(f"Checking if RoPE's cos/sin shape {cosine_or_sine.shape} matches input shape @1 (token limit) {x.shape[1]}, @-1 (dimension) {x.shape[-1]}")
 
         assert cosine_or_sine.shape == (x.shape[1], x.shape[-1]), "the input token_limit and dimension needs to match RoPE's token_limit and dimension"
         broadcast_shape = []
