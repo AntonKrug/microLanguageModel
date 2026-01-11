@@ -1,0 +1,196 @@
+<html>
+<head>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      padding: 20px;
+      max-width: 1800px;
+    }
+    .slider-group {
+      margin-bottom: 20px;
+    }
+    .label {
+      font-weight: bold;
+      margin-bottom: 4px;
+      display: block;
+    }
+    .calculated {
+      font-weight: normal;
+      margin-left: 10px;
+    }
+    .calculated-group {
+      margin-top: 30px;
+      padding-top: 10px;
+      border-top: 1px solid #ccc;
+    }
+    input[type="range"] {
+      width: 100%;
+    }
+  </style>
+</head>
+<body>
+  <div class="slider-group">
+    <span class="label">Vocabulary size: <span id="vocabValue"></span></span>
+    <input id="vocab" type="range" min="3" max="8192" step="1" value="2048">
+  </div>
+
+  <div class="slider-group">
+    <span class="label">Max sequence length: <span id="seqValue"></span></span>
+    <input id="seq" type="range" min="1" max="512" step="1" value="150">
+  </div>
+
+  <div class="slider-group">
+    <span class="label">Key/Value heads: <span id="kvHeadCountValue"></span></span>
+    <input id="kvHeadCount" type="range" min="1" max="32" step="1" value="4">
+  </div>
+
+  <div class="slider-group">
+    <span class="label">Key/value heads per query head: <span id="kvHeadsValue"></span></span>
+    <input id="kvHeads" type="range" min="1" max="16" step="1" value="2">
+  </div>
+
+  <div class="slider-group">
+    <span class="label">Dimensions per head: <span id="dimHeadValue"></span></span>
+    <input id="dimHead" type="range" min="1" max="64" step="1" value="6">
+  </div>
+
+  <div class="slider-group">
+    <span class="label">Feed-forward hidden dimensions: <span id="ffnValue"></span></span>
+    <input id="ffn" type="range" min="1" max="1024" step="1" value="128">
+  </div>
+
+  <div class="slider-group">
+    <span class="label">Transformer block layers: <span id="layersValue"></span></span>
+    <input id="layers" type="range" min="1" max="32" step="1" value="5">
+  </div>
+
+  <div class="calculated-group">
+    <span class="label">Embedding dimensions: <span id="embedDimValue" class="calculated"></span></span>
+    <span class="label">Query heads: <span id="queryHeadsValue" class="calculated"></span></span>
+    <span class="label">Query dimensions: <span id="queryDimValue" class="calculated"></span></span>
+    <span class="label">Key/Value dimensions: <span id="kvDimValue" class="calculated"></span></span>
+    <span class="label">Feed-forward hidden dimensions estimate: <span id="ffnEstimateValue" class="calculated"></span></span>
+  </div>
+
+  <div class="calculated-group">
+    <h3>State (RAM requirement)</h3>
+    <span class="label">X and temps: <span id="stateX" class="calculated"></span></span>
+    <span class="label">Feed forward hidden network and temps: <span id="stateHidden" class="calculated"></span></span>
+    <span class="label">Q: <span id="stateQ" class="calculated"></span></span>
+    <span class="label">Key &amp; Value caches: <span id="stateKVCache" class="calculated"></span></span>
+    <span class="label">Attention: <span id="stateAttention" class="calculated"></span></span>
+    <span class="label">Logits: <span id="stateLogits" class="calculated"></span></span>
+
+    <span class="label">Total: <span id="stateBits" class="calculated"></span> bytes (if using bit)</span>
+    <span class="label">Total: <span id="stateTotal" class="calculated"></span> bytes (if using int8)</span>
+    <span class="label">Total: <span id="stateFP16" class="calculated"></span> bytes (if using fp6)</span>
+    <span class="label">Total: <span id="stateFloat" class="calculated"></span> bytes (if using float)</span>
+  </div>
+
+  <div class="calculated-group">
+    <h3>Model parameters - weights, vectors - (ROM requirement)</h3>
+    <span class="label">Token embedding vectors: <span id="wToken" class="calculated"></span></span>
+    <span class="label">RMS normalization for attention: <span id="wRmsAtt" class="calculated"></span></span>
+    <span class="label">RMS normalization for feed-forward hidden network: <span id="wRmsFfn" class="calculated"></span></span>
+    <span class="label">RMS normalization final: <span id="wRmsFinal" class="calculated"></span></span>
+    <span class="label">Weights Query<span id="wQ" class="calculated"></span></span>
+    <span class="label">Weights Key<span id="wK" class="calculated"></span></span>
+    <span class="label">Weights Value<span id="wV" class="calculated"></span></span>
+    <span class="label">Weights Output<span id="wO" class="calculated"></span></span>
+    <span class="label">Weights feed-forward hidden network<span id="wFfn" class="calculated"></span></span>
+
+    <span class="label">Total: <span id="wBits" class="calculated"></span> bytes (if using bit)</span>
+    <span class="label">Total: <span id="wTotal" class="calculated"></span> bytes (if using int8)</span>
+    <span class="label">Total: <span id="wFp16" class="calculated"></span> bytes (if using fp6)</span>
+    <span class="label">Total: <span id="wFloat" class="calculated"></span> bytes (if using float)</span>
+  </div>
+
+  <script>
+    function v(id) {
+      return parseInt(document.getElementById(id).value, 10);
+    }
+    function set(id, value) {
+      document.getElementById(id).textContent = value;
+    }
+
+    function updateAll() {
+      set("vocabValue", v("vocab"));
+      set("seqValue", v("seq"));
+      set("kvHeadCountValue", v("kvHeadCount"));
+      set("kvHeadsValue", v("kvHeads"));
+      set("dimHeadValue", v("dimHead"));
+      set("ffnValue", v("ffn"));
+      set("layersValue", v("layers"));
+
+      const queryHeads = v("kvHeads") * v("kvHeadCount");
+      set("queryHeadsValue", queryHeads);
+
+      const embedDim = v("dimHead") * queryHeads;
+      set("embedDimValue", embedDim);
+
+      set("queryDimValue", embedDim);
+      set("kvDimValue", v("dimHead") * v("kvHeadCount"));
+
+      const ffnEstimate = Math.round(embedDim * 8 / 3);
+      set("ffnEstimateValue", ffnEstimate);
+
+      const stateX = 3 * embedDim;
+      const stateHidden = 2 * v("ffn");
+      const stateQ = embedDim;
+      const stateKVCache = 2 * v("layers") * v("seq") * v("dimHead") * v("kvHeadCount");
+      const stateAttention = queryHeads * v("seq");
+      const stateLogits = v("vocab");
+
+      set("stateX", stateX);
+      set("stateHidden", stateHidden);
+      set("stateQ", stateQ);
+      set("stateKVCache", stateKVCache);
+      set("stateAttention", stateAttention);
+      set("stateLogits", stateLogits);
+
+      const stateTotal = stateX + stateHidden + stateQ + stateKVCache + stateAttention + stateLogits;
+
+      set("stateBits", Math.ceil(stateTotal/8));
+      set("stateTotal", stateTotal);
+      set("stateFP16", stateTotal * 2);
+      set("stateFloat", stateTotal * 4);
+
+      const wToken = v("vocab") * embedDim;
+      const wRmsAtt = v("layers") * embedDim;
+      const wRmsFfn = v("layers") * embedDim;
+      const wRmsFinal = embedDim;
+      const wQ = v("layers") * embedDim * queryHeads * v("dimHead");
+      const wK = v("layers") * embedDim * v("kvHeads") * v("dimHead");
+      const wV = v("layers") * embedDim * v("kvHeads") * v("dimHead");
+      const wO = v("layers") * embedDim * queryHeads * v("dimHead");
+      const wFfn = 3 * v("layers") * v("ffn") * embedDim;
+
+      set("wToken", wToken);
+      set("wRmsAtt", wRmsAtt);
+      set("wRmsFfn", wRmsFfn);
+      set("wRmsFinal", wRmsFinal);
+      set("wQ", wQ);
+      set("wK", wK);
+      set("wV", wV);
+      set("wO", wO);
+      set("wFfn", wFfn);
+
+      const wTotal = wToken + wRmsAtt + wRmsFfn + wRmsFinal + wQ + wK + wV + wO + wFfn;
+
+      set("wBits", Math.ceil(wTotal/8));
+      set("wTotal", wTotal);
+      set("wFp16", wTotal * 2);
+      set("wFloat", wTotal * 4);
+    }
+
+    document.querySelectorAll("input[type=range]").forEach(slider => {
+      slider.addEventListener("input", updateAll);
+      slider.addEventListener("change", updateAll);
+    });
+
+    updateAll();
+  </script>
+
+</body>
+</html>
+
