@@ -81,10 +81,10 @@
     <span class="label">Attention: <span id="stateAttention" class="calculated"></span></span>
     <span class="label">Logits: <span id="stateLogits" class="calculated"></span></span>
 
-    <span class="label">Total: <span id="stateBits" class="calculated"></span> bytes (if using bit)</span>
-    <span class="label">Total: <span id="stateTotal" class="calculated"></span> bytes (if using int8)</span>
-    <span class="label">Total: <span id="stateFP16" class="calculated"></span> bytes (if using fp6)</span>
-    <span class="label">Total: <span id="stateFloat" class="calculated"></span> bytes (if using float)</span>
+    <span class="label">Total: <span id="stateBits" class="calculated"></span> (if using bit)</span>
+    <span class="label">Total: <span id="stateTotal" class="calculated"></span> (if using int8)</span>
+    <span class="label">Total: <span id="stateFP16" class="calculated"></span> (if using fp6)</span>
+    <span class="label">Total: <span id="stateFloat" class="calculated"></span> (if using float)</span>
   </div>
 
   <div class="calculated-group">
@@ -99,18 +99,30 @@
     <span class="label">Weights Output<span id="wO" class="calculated"></span></span>
     <span class="label">Weights feed-forward hidden network<span id="wFfn" class="calculated"></span></span>
 
-    <span class="label">Total: <span id="wBits" class="calculated"></span> bytes (if using bit)</span>
-    <span class="label">Total: <span id="wTotal" class="calculated"></span> bytes (if using int8)</span>
-    <span class="label">Total: <span id="wFp16" class="calculated"></span> bytes (if using fp6)</span>
-    <span class="label">Total: <span id="wFloat" class="calculated"></span> bytes (if using float)</span>
+    <span class="label">Total: <span id="wBits" class="calculated"></span> (if using bit)</span>
+    <span class="label">Total: <span id="wTotal" class="calculated"></span> (if using int8)</span>
+    <span class="label">Total: <span id="wFp16" class="calculated"></span> (if using fp6)</span>
+    <span class="label">Total: <span id="wFloat" class="calculated"></span> (if using float)</span>
   </div>
 
   <script>
     function v(id) {
       return parseInt(document.getElementById(id).value, 10);
     }
+
     function set(id, value) {
       document.getElementById(id).textContent = value;
+    }
+
+    function humanBytes(bytes) {
+      if (bytes < 1024) return bytes + " Bytes";
+      const units = ["KB", "MB", "GB"];
+      let i = -1;
+      do {
+        bytes /= 1024;
+        i++;
+      } while (bytes >= 1024 && i < units.length - 1);
+      return Math.ceil(bytes *100)/100 + " " + units[i];
     }
 
     function updateAll() {
@@ -150,10 +162,10 @@
 
       const stateTotal = stateX + stateHidden + stateQ + stateKVCache + stateAttention + stateLogits;
 
-      set("stateBits", Math.ceil(stateTotal/8));
-      set("stateTotal", stateTotal);
-      set("stateFP16", stateTotal * 2);
-      set("stateFloat", stateTotal * 4);
+      set("stateBits", humanBytes(Math.ceil(stateTotal/8)));
+      set("stateTotal", humanBytes(stateTotal));
+      set("stateFP16", humanBytes(stateTotal * 2));
+      set("stateFloat", humanBytes(stateTotal * 4));
 
       const wToken = v("vocab") * embedDim;
       const wRmsAtt = v("layers") * embedDim;
@@ -177,10 +189,10 @@
 
       const wTotal = wToken + wRmsAtt + wRmsFfn + wRmsFinal + wQ + wK + wV + wO + wFfn;
 
-      set("wBits", Math.ceil(wTotal/8));
-      set("wTotal", wTotal);
-      set("wFp16", wTotal * 2);
-      set("wFloat", wTotal * 4);
+      set("wBits", humanBytes(Math.ceil(wTotal/8)));
+      set("wTotal", humanBytes(wTotal));
+      set("wFp16", humanBytes(wTotal * 2));
+      set("wFloat", humanBytes(wTotal * 4));
     }
 
     document.querySelectorAll("input[type=range]").forEach(slider => {
