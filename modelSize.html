@@ -88,7 +88,7 @@
   </div>
 
   <div class="calculated-group">
-    <h3>Model parameters - weights, vectors - (ROM requirement)</h3>
+    <h3>Model <span id="params"></span> - weights, vectors - (ROM requirement)</h3>
     <span class="label">Token embedding vectors: <span id="wToken" class="calculated"></span></span>
     <span class="label">RMS normalization for attention: <span id="wRmsAtt" class="calculated"></span></span>
     <span class="label">RMS normalization for feed-forward hidden network: <span id="wRmsFfn" class="calculated"></span></span>
@@ -125,6 +125,17 @@
       return Math.ceil(bytes *100)/100 + " " + units[i];
     }
 
+    function parameters(params) {
+      if (params < 1000) return params + " parameters";
+      const units = ["k", "M", "B"];
+      let i = -1;
+      do {
+        params /= 1000;
+        i++;
+      } while (params >= 1000 && i < units.length - 1);
+      return Math.ceil(params) + units[i] + " parameters";
+    }
+
     function updateAll() {
       set("vocabValue", v("vocab"));
       set("seqValue", v("seq"));
@@ -143,7 +154,7 @@
       set("queryDimValue", embedDim);
       set("kvDimValue", v("dimHead") * v("kvHeadCount"));
 
-      const ffnEstimate = Math.round(embedDim * 8 / 3);
+      const ffnEstimate = Math.round((embedDim * 8) / 3);
       set("ffnEstimateValue", ffnEstimate);
 
       const stateX = 3 * embedDim;
@@ -193,6 +204,7 @@
       set("wTotal", humanBytes(wTotal));
       set("wFp16", humanBytes(wTotal * 2));
       set("wFloat", humanBytes(wTotal * 4));
+      set("params", parameters(wTotal));
     }
 
     document.querySelectorAll("input[type=range]").forEach(slider => {
