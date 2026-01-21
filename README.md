@@ -48,11 +48,14 @@ Including the versions which worked for me quick justification/explanations why:
 
 ## Weight matrices
 - all are rank-2 matrices
-- embeddedding [11, 48] (vocabulary size, embedding dimensions)
+- embeddedding [11, 48] (vocabulary size, embedding dimensions) aka  W_vocab [11,48] 
+  - it will be used on the input and on the output, but on the output (vocabulary size, embedding dimensions) but will have to be transposed later to (embedding dimensions, vocabulary size), 
+  - so maybe already have one and transpose them when needed, or pre-bake the transpose variant into a new separate weights 
 - RMS norm weights (for scaling) 
-  - attention [9, 48] (transformer layers, embedding dimensions)
-  - ffn [9, 48] (transformer layers, embedding dimensions)
-  - final [48] (embedding dimensions)
+  - transformer block
+    - attention [9, 48] (transformer layers, embedding dimensions) or 9x [48]
+    - ffn [9, 48] (transformer layers, embedding dimensions) or 9x [48]
+  - final [48] (embedding dimensions) (doesn't need to be 9x because it's outside transformer block)
 - linear projections 
   - dimensions of the attention = (query heads * dimensions per head) which is the same as embedding dimensions = 48
   - dimensions of kv heads = (key heads * dimensions per head) which is in our case half = 24
@@ -108,7 +111,7 @@ Including the versions which worked for me quick justification/explanations why:
 
 
 ### RoPE (Rotary Positional Encoding)
-- base = 100000 
+- base = 100000 - for small amount of dimensions, over small amount of max_tokens, we will waste lot of angular resolution as we will not rotate fully with such small model/parameters and rope results will be almost as it didn't happen, being position free. maybe base of 64 - 512 etc... could make it more local, 128 for 50 token limit, 256 for 100 token limit and 512 for 150 
 - dim_index 0 .... (embedding dimensions / 2) -1
 - θ[dim_index] = base  ^ {-2 dim_index / dimensions per (QKV) head}
 
@@ -202,11 +205,11 @@ Including the versions which worked for me quick justification/explanations why:
 - (B,T,D) [7,5,48] 
 
 ### Feedfoward (specifically the Multi-Layer Perceptron (MLP)) block with SwiGLU/SiLU+gating
-- FFNinput  (B,T,Dffn):     U = XresidualNorm (B,T,D) * W1 (expand features) (D, Dffn)
-- FFNhidden (B,T,Dffn):     V = XresidualNorm (B,T,D) * W2 (gate vector) (D, Dffn)
+- FFNinput  (B,T,Dffn):     U = XresidualNorm (B,T,D) * W_up W1 (expand features) (D, Dffn)
+- FFNhidden (B,T,Dffn):     V = XresidualNorm (B,T,D) * W_gate W3 (gate vector) (D, Dffn)
 - SwiGLU (B,T,Dffn):        G = SiLU(V)
    - Gating GLU (B,T,Dffn): H = U element wise multiply with G
-- Project back MLP_OUTPUT (B,T,D) = H (B,T,Dffn) * W3 (Dffn,D) to compress back to D
+- Project back MLP_OUTPUT (B,T,D) = H (B,T,Dffn) * W_down W2 (Dffn,D) to compress back to D
 
 
 ### Residual connection again
@@ -225,7 +228,7 @@ Including the versions which worked for me quick justification/explanations why:
 - (B,T,D) [7,5,48] 
 
 ### Linear projection (LM head)
-- map the hidden dimensions into vocab dimensions
+- map the hidden dimensions into vocab dimensions (W_vocab aka Wlm)
 - logits                = Xfinal   *  W_vocab^T
 - (B,T,vocabulary size)   (B,T,D)  *  (vocabulary size, D)^T is (D, vocabulary size)
 - [7,5,11]                [7,5,48]    [11,48]^T is [48,11]
