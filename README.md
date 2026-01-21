@@ -152,7 +152,7 @@ Including the versions which worked for me quick justification/explanations why:
   - when adding it back to its batch&head it would look like (B,H,T,T)
   - SCOREi += Masking for future tokens (diagonals)
   - SCOREi += Masking for padded batches (when training same MAX_SEQ_LEN batches, but not every single one inside has same size, so the end token (and after) can produce -inf mask)
-    - Also later don't forget to do loss masking
+    - Also later don't forget to do loss masking outside the model when computing loss
   - ATTENTIONi = Softmax(SCOREi) // per each column, over the last dimension aka normalizes each row T separately (second last dimension) by summing all columns for that row to a 1, example:
 
   - SCORE[b,h,:,:] =
