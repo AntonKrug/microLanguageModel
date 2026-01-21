@@ -111,7 +111,7 @@ Including the versions which worked for me quick justification/explanations why:
 
 
 ### RoPE (Rotary Positional Encoding)
-- base = 100000 - for small amount of dimensions, over small amount of max_tokens, we will waste lot of angular resolution as we will not rotate fully with such small model/parameters and rope results will be almost as it didn't happen, being position free. maybe base of 64 - 512 etc... could make it more local, 128 for 50 token limit, 256 for 100 token limit and 512 for 150 
+- base = 100000 - for small amount of dimensions, over small amount of max_tokens, we will waste lot of angular resolution as we will not rotate fully with such small model/parameters and rope results will be almost as it didn't happen, being position free. maybe base of 64 - 512 etc... could make it more local, 128 for 50 token limit, 256 for 100 token limit and 512 for 150 (about 2.5x of max token limity rounded up to power of 2 number) 
 - dim_index 0 .... (embedding dimensions / 2) -1
 - θ[dim_index] = base  ^ {-2 dim_index / dimensions per (QKV) head}
 
