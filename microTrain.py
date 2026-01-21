@@ -13,17 +13,17 @@ import torch
 import torchviz
 from sympy.codegen.fnodes import dimension
 
-# model params
+# model params - hyper parameters
 vocabulary_size = 3169
 vocabulary_size_all_tokens = vocabulary_size + 2 # +2 for UNK and BOS
 
 key_value_heads = 4  # 4 key and value heads
 key_value_to_query_heads_ratio = 2  # end up with 2 queries per 1 key
 
-attention_heads = key_value_heads * key_value_to_query_heads_ratio  # grouped query attention (GQA) - 8 query heads (rotary) for 4 key (rotary) and 4 value
-dimensions_per_head_per_real_or_imaginary = 3 # whe dimensions_per_head will be split between real and imaginary RoPE fragments we want to have them evenly split *2
-dimensions_per_head = dimensions_per_head_per_real_or_imaginary * 2  # how many dimensions from the token each query head will be assigned with (one for real and imaginary)
-vocabulary_dimensions = attention_heads * dimensions_per_head  # size of vector associated with each token
+attention_query_heads = key_value_heads * key_value_to_query_heads_ratio  # grouped query attention (GQA) - 8 query heads (rotary) for 4 key (rotary) and 4 value
+dimensions_per_query_head_per_real_or_imaginary = 3 # when dimensions_per_head will be split between real and imaginary RoPE fragments we want to have them evenly split *2
+dimensions_per_query_head = dimensions_per_query_head_per_real_or_imaginary * 2  # how many dimensions from the token each query head will be assigned with (one for real and imaginary)
+vocabulary_dimensions = attention_query_heads * dimensions_per_query_head  # size of vector associated with each token
 
 token_limit = 50  # limit of the context token window
 transformer_layers = 6  # how many copies of the whole transformer stack are there
@@ -41,6 +41,8 @@ learning_rate = 0.001
 dropout = 0.05
 weight_decay = 0.01
 multiple_of = 1
+
+torch_device = "cuda" if torch.cuda.is_available() else "cpu"
 
 # files
 input_data_json_file_name = os.path.join("data-input", "sentences.json")
@@ -94,18 +96,18 @@ class RotaryPositionEmbedding(torch.nn.Module):
         # example each token has 128 dimensions, with 4 heads, it's 32 dimensions per head
 
         # when dimensions_per_head==32 (0,2,4...30) and when dimensions_per_head==33 (0,2,4...30,32)
-        even_dimensions_from_head = torch.arange(0, dimensions_per_head, 2)
+        even_dimensions_from_head = torch.arange(0, dimensions_per_query_head, 2)
 
         # when dimensions_per_head even then no change.
         # when dimensions_per_head odd then truncate last dimension: dimensions_per_head==33 (0,2,4...30)
         # so we get even amount (aligned for cos and sin) of even values
         # https://www.reddit.com/r/LocalLLaMA/comments/1c79xxd/anyone_has_ideas_about_the_wired_rope_theta_of/
-        aligned_dimensions = even_dimensions_from_head[: (dimensions_per_head // 2)]
+        aligned_dimensions = even_dimensions_from_head[: (dimensions_per_query_head // 2)]
 
         assert even_dimensions_from_head.shape == aligned_dimensions.shape, "we shouldn't have extra dimension which will get only real, but no imaginary part"
 
         # rescaled from 0 to almost 1.0 (non-inclusive)
-        by_power_normalized = aligned_dimensions.float() / dimensions_per_head
+        by_power_normalized = aligned_dimensions.float() / dimensions_per_query_head
 
         # base on which the inverse power will be calculated (the theta)
         # https://www.frontiersin.org/journals/computer-science/articles/10.3389/fcomp.2025.1626899/full
@@ -125,9 +127,9 @@ class RotaryPositionEmbedding(torch.nn.Module):
         theta_outer_sin = torch.sin(theta_outer)
 
         if self.debug:
-            print(f"vocabulary dimensions {vocabulary_dimensions} spread to {attention_heads} attention heads x "
-                  f"{dimensions_per_head} dimensions per head (which is 2 (real&imaginary) * by "
-                  f"{dimensions_per_head_per_real_or_imaginary})")
+            print(f"vocabulary dimensions {vocabulary_dimensions} spread to {attention_query_heads} attention heads x "
+                  f"{dimensions_per_query_head} dimensions per head (which is 2 (real&imaginary) * by "
+                  f"{dimensions_per_query_head_per_real_or_imaginary})")
 
             print(f"even dimensions from head {even_dimensions_from_head}")
             print(f"even dimensions normalized to 'by_power' {by_power_normalized}")
@@ -184,7 +186,7 @@ class RotaryPositionEmbedding(torch.nn.Module):
         # (for real) and odd (for imaginary) from the original input tensor, real having index 0, imaginary index 1 ...
         real, imaginary = x_float.reshape(new_shape).unbind(-1)
 
-        assert dimensions_per_head_per_real_or_imaginary == real.shape[-1], "model spec should match reality"
+        assert dimensions_per_query_head_per_real_or_imaginary == real.shape[-1], "model spec should match reality"
         if self.debug:
             print(f"input shape {x.shape}. new_shape before reshaping {new_shape}. final real/imaginary shape {real.shape}")
 
@@ -216,6 +218,28 @@ class RotaryPositionEmbedding(torch.nn.Module):
 
         return query_out.type_as(query), key_out.type_as(key)
 
+class GroupedQueryAttentionWithQueryKeyCache(torch.nn.Module):
+    # use partially cached keys and partially cached values, which is good for inference
+    # but for training we might need to drop the cached aproach
+    def __init__(self, debug = False):
+        super().__init__()
+        # weights state matrix-es
+        self.weight_query  = torch.nn.Linear(vocabulary_dimensions, vocabulary_dimensions, bias=False)
+        self.weight_key    = torch.nn.Linear(vocabulary_dimensions, key_value_heads * dimensions_per_query_head, bias=False)
+        self.weight_value  = torch.nn.Linear(vocabulary_dimensions, key_value_heads * dimensions_per_query_head, bias=False)
+        self.weight_result = torch.nn.Linear(vocabulary_dimensions, vocabulary_dimensions, bias=False)
+
+        self.cache_keys = torch.zeros(batch_size, token_limit, key_value_heads, dimensions_per_query_head)
+        self.cache_values = torch.zeros(batch_size, token_limit, key_value_heads, dimensions_per_query_head)
+        if debug:
+            print(f"default device for torch {torch_device}")
+            print(f"cache is places on device {self.cache_keys.device}")
+
+    def forward(self, x, position, rope_cos, rope_sin, attention_mask):
+        # x.shape = batch_size,token_limit,vocabulary_dimensions
+        queries = self.weight_query(x)
+        keys    = self.weight_key(x)
+        values  = self.weight_value(x)
 
 class Model(object):
 
@@ -227,8 +251,8 @@ class Model(object):
 
         return (
             x[:, :, :, None, :]
-            .expand(batch_size, token_limit, key_value_heads, scale_ratio, dimensions_per_head)
-            .reshape(batch_size, token_limit, key_value_heads * scale_ratio, dimensions_per_head)
+            .expand(batch_size, token_limit, key_value_heads, scale_ratio, dimensions_per_query_head)
+            .reshape(batch_size, token_limit, key_value_heads * scale_ratio, dimensions_per_query_head)
         )
 
 
@@ -600,10 +624,12 @@ def to_tokens():
 def train(debug=False):
 
     torch.set_default_dtype(torch.bfloat16)
-    torch.set_default_device("cuda" if torch.cuda.is_available() else "cpu")
+    torch.set_default_device(torch_device)
 
     # https://docs.pytorch.org/docs/stable/generated/torch.set_printoptions.html
     torch.set_printoptions(threshold=40000, sci_mode=False, precision=8, linewidth=120)
+
+    attention = GroupedQueryAttentionWithQueryKeyCache(debug)
 
     rope = RotaryPositionEmbedding(debug,1000)
     print(rope.state_dict())
@@ -616,8 +642,8 @@ def train(debug=False):
     x = torch.randn(1, 8)
     y = model(x)
 
-    sanity_q = torch.randn(2, token_limit, attention_heads, dimensions_per_head)
-    sanity_k = torch.randn(2, token_limit, key_value_heads, dimensions_per_head)
+    sanity_q = torch.randn(2, token_limit, attention_query_heads, dimensions_per_query_head)
+    sanity_k = torch.randn(2, token_limit, key_value_heads, dimensions_per_query_head)
     actual_q, actual_k = rope.forward(sanity_q, sanity_k)
     print(actual_q.shape, actual_k.shape)
 
@@ -641,7 +667,7 @@ if __name__ == "__main__":
     elif args.function == "to_tokens":
         to_tokens()
     elif args.function == "train":
-        #todo: debug as parameter
+        #todo: debug as command line parameter
         train(debug=True)
     else:
         raise ValueError(f"Unknown argument {args.function}")
